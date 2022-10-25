@@ -1,7 +1,7 @@
 # *USE AT YOUR OWN RISK!*
 
 # How to use
-## Perpare
+## Prepare
 1. Open BambuStudio and Login account
 2. Goto Devices Tab and view your machine status
 3. Close BambuStudio and it will generate `BambuNetworkEngine.conf` under `X:\Users\[user_name]\AppData\Roaming\BambuStudio`
