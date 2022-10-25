@@ -1,0 +1,1058 @@
+#define BAMBU_DYNAMIC
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <wchar.h>
+#include <string.h>
+#include <fcntl.h>
+#if defined(_MSC_VER) || defined(_WIN32)
+#include <Windows.h>
+#include <WinInet.h>
+#include <Shlobj.h> 
+#include <shlwapi.h>
+#include <io.h>
+#else
+#include <ctype.h>
+#include <dlfcn.h>
+#include <unistd.h>
+#include <curl/curl.h>
+#define _snprintf snprintf
+#define _stricmp strcmp
+#endif
+#include "cJSON.h"
+#include "BambuTunnel.h"
+
+#define BAMBUE_START_STREAM_RETRY_COUNT (40)
+
+static int get_bambu_studio_user_info(char **user_id, char **dev_id, char **token, char **region)
+{
+    int ret = 0;
+#if defined(_MSC_VER) || defined(_WIN32)
+    char app_data_path[MAX_PATH + 1] = {0};
+    char bambu_cfg_path[MAX_PATH + 1] = {0};
+#else
+    char bambu_cfg_path[256 + 1] = {0};
+#endif
+    FILE *cfg_file = NULL;
+    char *cfg_data = NULL;
+    cJSON *cfg_json = NULL;
+    cJSON *last_monitor_machine_item = NULL;
+    cJSON *user_item = NULL;
+    cJSON *user_id_item = NULL;
+    cJSON *token_item = NULL;
+    cJSON *country_code_item = NULL;
+    char *user_id_str = NULL;
+    char *dev_id_str = NULL;
+    char *token_str = NULL;
+    char *region_str = NULL;
+
+    do
+    {
+#if defined(_MSC_VER) || defined(_WIN32)
+        if (PathFileExistsA("BambuNetworkEngine.conf"))
+        {
+            _snprintf(bambu_cfg_path, sizeof(bambu_cfg_path), "BambuNetworkEngine.conf");
+        }
+        else if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_DEFAULT, app_data_path)))
+        {
+            _snprintf(bambu_cfg_path, sizeof(bambu_cfg_path), "%s\\BambuStudio\\BambuNetworkEngine.conf", app_data_path);
+            if (!PathFileExistsA(bambu_cfg_path))
+            {
+                ret = -1;
+                fprintf(stderr, "get %s failed\n", bambu_cfg_path);
+                break;
+            }
+        }
+        else
+        {
+            ret = -1;
+            fprintf(stderr, "SHGetFolderPath failed 0x%x\n", GetLastError());
+            break;
+        }
+#else
+        if (access("BambuNetworkEngine.conf", F_OK) == 0) 
+        {
+            snprintf(bambu_cfg_path, sizeof(bambu_cfg_path), "BambuNetworkEngine.conf");
+        }
+        else 
+        {
+            ret = -1;
+            fprintf(stderr, "BambuNetworkEngine.conf not exist\n");
+            break;
+        }
+#endif
+
+        cfg_file = fopen(bambu_cfg_path, "r");
+        if (cfg_file == NULL)
+        {
+            fprintf(stderr, "fopen failed\n");
+            break;
+        }
+
+        fseek(cfg_file, 0L, SEEK_END);
+        size_t cfg_file_size = ftell(cfg_file);
+        if (cfg_file_size == 0)
+        {
+            fprintf(stderr, "cfg_file is empty\n");
+            break;            
+        }
+        fseek(cfg_file, 0L, SEEK_SET);
+        cfg_data = (char *)malloc(cfg_file_size);
+        if (cfg_data == NULL)
+        {
+            fprintf(stderr, "malloc cfg_data failed\n");
+            break;            
+        }
+
+        fread(cfg_data, 1, cfg_file_size, cfg_file);
+        cfg_json = cJSON_Parse(cfg_data);
+        if (cfg_json == NULL)
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "Parse cfg json failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+
+        last_monitor_machine_item = cJSON_GetObjectItem(cfg_json, "last_monitor_machine");
+        if (last_monitor_machine_item == NULL 
+            || !cJSON_IsString(last_monitor_machine_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get last_monitor_machine\n");
+            break;
+        }
+
+        user_item = cJSON_GetObjectItem(cfg_json, "user");
+        if (user_item == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "failed get user_item\n");
+            break;
+        }
+
+        user_id_item = cJSON_GetObjectItem(user_item, "user_id");
+        if (user_id_item == NULL 
+            || !cJSON_IsString(user_id_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get user_id\n");
+            break;
+        }
+
+        token_item = cJSON_GetObjectItem(user_item, "token");
+        if (token_item == NULL 
+            || !cJSON_IsString(token_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get token\n");
+            break;
+        }
+
+        country_code_item = cJSON_GetObjectItem(cfg_json, "country_code");
+        if (country_code_item == NULL 
+            || !cJSON_IsString(country_code_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get country_code\n");
+            break;
+        }
+
+        size_t user_id_str_len = strlen(cJSON_GetStringValue(user_id_item));
+        user_id_str = (char *)malloc(user_id_str_len + sizeof('\0'));
+        if (user_id_str == NULL)
+        {
+            fprintf(stderr, "malloc user_id_str failed\n");
+            break;            
+        }
+        strcpy(user_id_str, cJSON_GetStringValue(user_id_item));
+
+        size_t dev_id_str_len = strlen(cJSON_GetStringValue(last_monitor_machine_item));
+        dev_id_str = (char *)malloc(dev_id_str_len + sizeof('\0'));
+        if (dev_id_str == NULL)
+        {
+            fprintf(stderr, "malloc dev_id_str failed\n");
+            break;            
+        }
+        strcpy(dev_id_str, cJSON_GetStringValue(last_monitor_machine_item));
+
+        size_t token_str_len = strlen(cJSON_GetStringValue(token_item));
+        token_str = (char *)malloc(token_str_len + sizeof('\0'));
+        if (token_str == NULL)
+        {
+            fprintf(stderr, "malloc token_str failed\n");
+            break;            
+        }
+        strcpy(token_str, cJSON_GetStringValue(token_item));
+
+        size_t region_str_len = strlen(cJSON_GetStringValue(country_code_item));
+        region_str = (char *)malloc(region_str_len + sizeof('\0'));
+        if (region_str == NULL)
+        {
+            fprintf(stderr, "malloc region_str failed\n");
+            break;            
+        }
+        strcpy(region_str, cJSON_GetStringValue(country_code_item));
+        size_t i;
+        for (i = 0; i < region_str_len; i++)
+        {
+            region_str[i] = (char)tolower(region_str[i]);
+        }
+
+        ret = 0;
+    } while(false);
+
+    if (cfg_json != NULL)
+    {
+        cJSON_Delete(cfg_json);
+        cfg_json = NULL;
+    }
+
+    if (cfg_data != NULL)
+    {
+        free(cfg_data);
+        cfg_data = NULL;
+    }
+
+    if (cfg_file != NULL)
+    {
+        fclose(cfg_file);
+        cfg_file = NULL;
+    }
+
+    if (ret != 0)
+    {
+        if (user_id_str != NULL)
+        {
+            free(user_id_str);
+            user_id_str = NULL;
+        }
+
+        if (dev_id_str != NULL)
+        {
+            free(dev_id_str);
+            dev_id_str = NULL;
+        }
+
+        if (token_str != NULL)
+        {
+            free(token_str);
+            token_str = NULL;
+        }
+
+        if (region_str != NULL)
+        {
+            free(region_str);
+            region_str = NULL;
+        }
+    }
+    else
+    {
+        *user_id = user_id_str;
+        *dev_id = dev_id_str;
+        *token = token_str;
+        *region = region_str;
+    }
+
+    return ret;
+}
+
+#if defined(_MSC_VER) || defined(_WIN32)
+static int get_camera_url(char camera_url[256], char *user_id, char *dev_id, char *token_str, char *region)
+{
+    int ret = 0;
+    static char site_cn[] = "api.bambulab.cn";
+    static char site_global[] = "api.bambulab.com";
+    static char site_param[] = "v1/iot-service/api/user/ttcode";
+    const char* accept_type[] = {"application/json", NULL};
+    static char header[4096] = {0};
+    static char body[256] = {0};
+    int is_global_site = 0;
+    char rsp_json[1024] = {0};
+    DWORD byte_read = 0;
+    DWORD byte_write = 0;
+    INTERNET_BUFFERSA inet_buf = {0};
+
+    HINTERNET inet_hnd = NULL;
+    HINTERNET connect_hnd = NULL;
+    HINTERNET req_hnd = NULL;
+
+    cJSON *iot_json = NULL;
+    cJSON *message_item = NULL;
+    cJSON *ttcode_item = NULL;
+    cJSON *passwd_item = NULL;
+    cJSON *authkey_item = NULL;
+
+    do
+    {
+        if (0 == _stricmp(region,  "cn"))
+        {
+            is_global_site = 0;
+        }
+        else
+        {
+            is_global_site = 1;
+        }
+
+        _snprintf(header, sizeof(header), 
+            "content-Type: application/json\n\r"
+            "user-id: %s\n\r"
+            "Authorization: Bearer %s\n\r",
+            user_id, token_str);
+        _snprintf(body, sizeof(body), 
+            "{\"dev_id\": \"%s\"}", dev_id);
+
+        inet_hnd = InternetOpenA("", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+        if (inet_hnd == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "InternetOpenW failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        connect_hnd = InternetConnectA(inet_hnd, is_global_site ? site_global : site_cn, INTERNET_DEFAULT_HTTPS_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, NULL);
+        if (connect_hnd == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "InternetConnectW failed 0x%x\n", GetLastError());
+            break;
+        }
+
+
+        req_hnd = HttpOpenRequestA(connect_hnd, "POST", site_param, "HTTP/1.1", NULL, accept_type, INTERNET_FLAG_SECURE, 0);
+        if (req_hnd == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "HttpOpenRequestA failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        if (!HttpAddRequestHeadersA(req_hnd, header, -1, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDREQ_FLAG_REPLACE))
+        {
+            ret = -1;
+            fprintf(stderr, "HttpAddRequestHeadersA failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        inet_buf.dwStructSize = sizeof(inet_buf);
+        //inet_buf.lpvBuffer = &body[0];
+        //inet_buf.dwBufferLength = strlen(body);
+        //inet_buf.dwBufferTotal = inet_buf.dwBufferLength;
+        inet_buf.dwBufferTotal = strlen(body);
+
+        if (!HttpSendRequestExA(req_hnd, &inet_buf, NULL, 0, 0))
+        {
+            ret = -1;
+            fprintf(stderr, "HttpSendRequestExA failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        if (!InternetWriteFile(req_hnd, body, strlen(body), &byte_write))
+        {
+            ret = -1;
+            fprintf(stderr, "InternetWriteFile failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        HttpEndRequestA(req_hnd, NULL, 0, 0);
+
+        if (!InternetReadFile(req_hnd, rsp_json, sizeof(rsp_json) - sizeof('\0'), &byte_read))
+        {
+            ret = -1;
+            fprintf(stderr, "InternetReadFile failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        //fprintf(stderr, "%s\n", rsp_json);
+        if (byte_read == 0)
+        {
+            DWORD err = 0;
+            InternetGetLastResponseInfoA(&err, NULL, 0);
+            ret = -1;
+            fprintf(stderr, "InternetReadFile read empty %d\n", err);
+            break;
+        }
+
+        iot_json = cJSON_Parse(rsp_json);
+        if (iot_json == NULL)
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "Parse json failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+
+        message_item = cJSON_GetObjectItem(iot_json, "message");
+        if (message_item == NULL 
+            || !cJSON_IsString(message_item)
+            || 0 != strcmp(cJSON_GetStringValue(message_item), "success"))
+        {
+            ret = -1;
+            fprintf(stderr, "iot req failed\n %s\n", rsp_json);
+            break;
+        }
+
+        ttcode_item = cJSON_GetObjectItem(iot_json, "ttcode");
+        if (ttcode_item == NULL
+            || !cJSON_IsString(ttcode_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get ttcode\n %s\n", rsp_json);
+            break;
+        }
+
+        passwd_item = cJSON_GetObjectItem(iot_json, "passwd");
+        if (passwd_item == NULL
+            || !cJSON_IsString(passwd_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get passwd\n %s\n", rsp_json);
+            break;
+        }
+
+        authkey_item = cJSON_GetObjectItem(iot_json, "authkey");
+        if (authkey_item == NULL
+            || !cJSON_IsString(authkey_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get authkey\n %s\n", rsp_json);
+            break;
+        }
+
+        _snprintf(camera_url, 256, "bambu:///%s?authkey=%s&passwd=%s&region=%s",
+            cJSON_GetStringValue(ttcode_item),
+            cJSON_GetStringValue(authkey_item),
+            cJSON_GetStringValue(passwd_item),
+            region
+            );
+
+        ret = 0;
+    } while (false);
+
+    if (iot_json != NULL)
+    {
+        cJSON_Delete(iot_json);
+        iot_json = NULL;
+    }
+
+    if (req_hnd != NULL)
+    {
+        InternetCloseHandle(req_hnd);
+        req_hnd = NULL;
+    }
+
+    if (connect_hnd != NULL)
+    {
+        InternetCloseHandle(connect_hnd);
+        connect_hnd = NULL;
+    }
+
+    if (inet_hnd != NULL)
+    {
+        InternetCloseHandle(inet_hnd);
+        inet_hnd = NULL;
+    }
+
+    return ret;
+}
+#else
+
+struct bambu_curl_memory_data
+{
+    char *data;
+    size_t pos;
+    size_t total_size;
+};
+
+static size_t body_read_callback(char *buffer, size_t size, size_t nitems, void *stream)
+{
+    struct bambu_curl_memory_data *data = (struct bambu_curl_memory_data *)stream;
+    size_t read_size = 0;
+
+    if (data->pos + size * nitems >= data->total_size)
+    {
+        read_size = data->total_size - data->pos;
+    }
+    else if (data->pos >= data->total_size)
+    {
+        read_size = 0;
+        return read_size;
+    }
+    else 
+    {
+        read_size = size * nitems;
+    }
+
+    memcpy(buffer, &data->data[data->pos], read_size);
+    data->pos += read_size;
+
+    return read_size;
+}
+
+size_t rsp_write_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
+{
+    struct bambu_curl_memory_data *data = (struct bambu_curl_memory_data *)userdata;
+    size_t write_size = 0;
+
+    if (data->pos + size * nmemb >= data->total_size)
+    {
+        write_size = data->total_size - data->pos;
+    }
+    else if (data->pos >= data->total_size)
+    {
+        write_size = size * nmemb;
+        return write_size;
+    }
+    else 
+    {
+        write_size = size * nmemb;
+    }
+
+    memcpy(&data->data[data->pos], ptr, write_size);
+    data->pos += write_size;
+
+    return write_size;
+}
+
+struct data {
+  char trace_ascii; /* 1 or 0 */
+};
+ 
+static
+void curl_dump(const char *text,
+          FILE *stream, unsigned char *ptr, size_t size,
+          char nohex)
+{
+  size_t i;
+  size_t c;
+ 
+  unsigned int width = 0x10;
+ 
+  if(nohex)
+    /* without the hex output, we can fit more on screen */
+    width = 0x40;
+ 
+  fprintf(stream, "%s, %10.10lu bytes (0x%8.8lx)\n",
+          text, (unsigned long)size, (unsigned long)size);
+ 
+  for(i = 0; i<size; i += width) {
+ 
+    fprintf(stream, "%4.4lx: ", (unsigned long)i);
+ 
+    if(!nohex) {
+      /* hex not disabled, show it */
+      for(c = 0; c < width; c++)
+        if(i + c < size)
+          fprintf(stream, "%02x ", ptr[i + c]);
+        else
+          fputs("   ", stream);
+    }
+ 
+    for(c = 0; (c < width) && (i + c < size); c++) {
+      /* check for 0D0A; if found, skip past and start a new line of output */
+      if(nohex && (i + c + 1 < size) && ptr[i + c] == 0x0D &&
+         ptr[i + c + 1] == 0x0A) {
+        i += (c + 2 - width);
+        break;
+      }
+      fprintf(stream, "%c",
+              (ptr[i + c] >= 0x20) && (ptr[i + c]<0x80)?ptr[i + c]:'.');
+      /* check again for 0D0A, to avoid an extra \n if it's at width */
+      if(nohex && (i + c + 2 < size) && ptr[i + c + 1] == 0x0D &&
+         ptr[i + c + 2] == 0x0A) {
+        i += (c + 3 - width);
+        break;
+      }
+    }
+    fputc('\n', stream); /* newline */
+  }
+  fflush(stream);
+}
+ 
+static
+int curl_trace(CURL *handle, curl_infotype type,
+             char *data, size_t size,
+             void *userp)
+{
+  struct data *config = (struct data *)userp;
+  const char *text;
+  (void)handle; /* prevent compiler warning */
+ 
+  switch(type) {
+  case CURLINFO_TEXT:
+    fprintf(stderr, "== Info: %s", data);
+    /* FALLTHROUGH */
+  default: /* in case a new one is introduced to shock us */
+    return 0;
+ 
+  case CURLINFO_HEADER_OUT:
+    text = "=> Send header";
+    break;
+  case CURLINFO_DATA_OUT:
+    text = "=> Send data";
+    break;
+  case CURLINFO_SSL_DATA_OUT:
+    text = "=> Send SSL data";
+    break;
+  case CURLINFO_HEADER_IN:
+    text = "<= Recv header";
+    break;
+  case CURLINFO_DATA_IN:
+    text = "<= Recv data";
+    break;
+  case CURLINFO_SSL_DATA_IN:
+    text = "<= Recv SSL data";
+    break;
+  }
+ 
+  curl_dump(text, stderr, (unsigned char *)data, size, config->trace_ascii);
+  return 0;
+}
+
+static int get_camera_url(char camera_url[256], char *user_id, char *dev_id, char *token_str, char *region)
+{
+    int ret = 0;
+    static char site_cn[] = "https://api.bambulab.cn/v1/iot-service/api/user/ttcode";
+    static char site_global[] = "https://api.bambulab.com/v1/iot-service/api/user/ttcode";
+    const char* accept_type[] = {"application/json", NULL};
+    static char header_auth[4096] = {0};
+    static char header_userid[256] = {0};
+    static char body[256] = {0};
+    int is_global_site = 0;
+    static char rsp_json[1024] = {0};
+    CURL *curl = NULL;
+    CURLcode res;
+    struct curl_slist *header_list = NULL;
+
+    cJSON *iot_json = NULL;
+    cJSON *message_item = NULL;
+    cJSON *ttcode_item = NULL;
+    cJSON *passwd_item = NULL;
+    cJSON *authkey_item = NULL;
+
+    do
+    {
+        if (0 == _stricmp(region,  "cn"))
+        {
+            is_global_site = 0;
+        }
+        else
+        {
+            is_global_site = 1;
+        }
+
+        _snprintf(header_auth, sizeof(header_auth), 
+            "Authorization: Bearer %s",
+            token_str);
+        _snprintf(header_userid, sizeof(header_userid), 
+            "user-id: %s",
+            user_id);
+        _snprintf(body, sizeof(body), 
+            "{\"dev_id\": \"%s\"}", dev_id);
+
+        curl_global_init(CURL_GLOBAL_DEFAULT);
+
+        curl = curl_easy_init();
+        if (curl == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "curl_easy_init failed\n");
+            break;
+        }
+
+        // struct data config;
+        // config.trace_ascii = 1; /* enable ascii tracing */
+        // curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, my_trace);
+        // curl_easy_setopt(curl, CURLOPT_DEBUGDATA, &config);
+
+        //curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
+        curl_easy_setopt(curl, CURLOPT_URL, is_global_site ? site_global : site_cn);
+
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+
+        header_list = curl_slist_append(header_list, 
+            "Content-Type: application/json");
+        header_list = curl_slist_append(header_list, "accept: application/json");
+        header_list = curl_slist_append(header_list, header_userid);
+        header_list = curl_slist_append(header_list, header_auth);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(body));
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, &body[0]);
+
+        // struct bambu_curl_memory_data body_data = {0};
+        // body_data.data = &body[0];
+        // body_data.total_size = strlen(body) + 1;
+        // body_data.pos = 0;
+        //curl_easy_setopt(curl, CURLOPT_READFUNCTION, body_read_callback);
+        //curl_easy_setopt(curl, CURLOPT_READDATA, (void *)&body_data);
+
+        struct bambu_curl_memory_data rsp_data = {0};
+        rsp_data.data = &rsp_json[0];
+        rsp_data.total_size = sizeof(rsp_json) - sizeof('\0');
+        rsp_data.pos = 0;
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, rsp_write_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&rsp_data);
+
+        res = curl_easy_perform(curl);
+        if(res != CURLE_OK)
+        {
+            ret = -1;
+            fprintf(stderr, "curl_easy_perform() failed: %s\n",
+                curl_easy_strerror(res));
+            break;
+        }
+
+        iot_json = cJSON_Parse(rsp_json);
+        if (iot_json == NULL)
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "Parse json failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+
+        message_item = cJSON_GetObjectItem(iot_json, "message");
+        if (message_item == NULL 
+            || !cJSON_IsString(message_item)
+            || 0 != strcmp(cJSON_GetStringValue(message_item), "success"))
+        {
+            ret = -1;
+            fprintf(stderr, "iot req failed\n %s\n", rsp_json);
+            break;
+        }
+
+        ttcode_item = cJSON_GetObjectItem(iot_json, "ttcode");
+        if (ttcode_item == NULL
+            || !cJSON_IsString(ttcode_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get ttcode\n %s\n", rsp_json);
+            break;
+        }
+
+        passwd_item = cJSON_GetObjectItem(iot_json, "passwd");
+        if (passwd_item == NULL
+            || !cJSON_IsString(passwd_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get passwd\n %s\n", rsp_json);
+            break;
+        }
+
+        authkey_item = cJSON_GetObjectItem(iot_json, "authkey");
+        if (authkey_item == NULL
+            || !cJSON_IsString(authkey_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get authkey\n %s\n", rsp_json);
+            break;
+        }
+
+        _snprintf(camera_url, 256, "bambu:///%s?authkey=%s&passwd=%s&region=%s",
+            cJSON_GetStringValue(ttcode_item),
+            cJSON_GetStringValue(authkey_item),
+            cJSON_GetStringValue(passwd_item),
+            region
+            );
+
+        ret = 0;
+    } while (false);
+
+    if (iot_json != NULL)
+    {
+        cJSON_Delete(iot_json);
+        iot_json = NULL;
+    }
+
+    if (header_list != NULL)
+    {
+        curl_slist_free_all(header_list);
+        header_list = NULL;
+    }
+
+    if (curl != NULL)
+    {
+        curl_easy_cleanup(curl);
+        curl = NULL;
+    }
+    
+    curl_global_cleanup();
+
+    return ret;
+}
+#endif
+
+struct BambuLib lib = {0};
+#if defined(_MSC_VER) || defined(_WIN32)
+static HMODULE module = NULL;
+#else
+static void* module = NULL;
+#endif
+
+static void* get_function(const char* name)
+{
+    void* function = NULL;
+
+    if (!module)
+    {
+        return function;
+    }
+
+#if defined(_MSC_VER) || defined(_WIN32)
+    function = (void *)GetProcAddress(module, name);
+#else
+    function = (void *)dlsym(module, name);
+#endif
+
+    if (!function) 
+    {
+        fprintf(stderr, ", can not find function %s", name);
+        exit(-1);
+    }
+    return function;
+}
+
+#define GET_FUNC(x) *((void **)&lib.x) = get_function(#x)
+
+void bambu_log(void *ctx, int level, tchar const * msg)
+{
+    if (level <= 1)
+    {
+#if defined(_MSC_VER) || defined(_WIN32)
+      fwprintf(stderr, L"[%d] %s\n", level, msg);
+#else
+      fprintf(stderr, "[%d] %s\n", level, msg);
+#endif
+      lib.Bambu_FreeLogMsg(msg);
+    }
+}
+
+int start_bambu_stream(char *camera_url)
+{
+    Bambu_Tunnel tunnel = NULL;
+    int is_bambu_open = 0;
+    int ret = 0;
+
+    do {
+        fprintf(stderr, "Starting Session\n");
+
+        ret = lib.Bambu_Create(&tunnel, camera_url);
+        if (ret != 0)
+        {
+            fprintf(stderr, "Bambu_Create failed 0x%x\n", ret);
+            break;
+        }
+
+        lib.Bambu_SetLogger(tunnel, bambu_log, tunnel);
+
+        ret = lib.Bambu_Open(tunnel);
+        if (ret != 0)
+        {
+            fprintf(stderr, "Bambu_Open failed: 0x%x\n", ret);
+            break;
+        }
+        is_bambu_open++;
+
+        size_t i;
+        for (i = 0; i < BAMBUE_START_STREAM_RETRY_COUNT; i++)
+        {
+            ret = lib.Bambu_StartStream(tunnel, true);
+            //fprintf(stderr, "Bambu_StartStream ret: 0x%x\n", ret);
+
+            if (ret == 0)
+            {
+                break;
+            }
+
+#if defined(_MSC_VER) || defined(_WIN32)
+            Sleep(1000);
+#else
+            usleep(1000 * 1000);
+#endif
+        }
+
+        if (ret != 0)
+        {
+            fprintf(stderr, "Bambu_StartStream failed 0x%x\n", ret);
+            break;
+        }
+
+        int result = 0;
+        while (true) 
+        {
+            Bambu_Sample sample;
+            result = lib.Bambu_ReadSample(tunnel, &sample);
+
+            if (result == Bambu_success) 
+            {
+                fwrite(sample.buffer, 1, sample.size, stdout);
+                fflush(stdout);
+                continue;
+            } 
+            else if (result == Bambu_would_block) 
+            {
+#if defined(_MSC_VER) || defined(_WIN32)
+                Sleep(100);
+#else
+                usleep(100 * 1000);
+#endif
+                continue;
+            } 
+            else if (result == Bambu_stream_end) 
+            {
+                fprintf(stderr, "Bambu_stream_end\n");
+                result = 0;
+            } 
+            else 
+            {
+                result = -1;
+                fprintf(stderr, "ERROR_PIPE\n");
+                ret = -1;
+            }
+            break;
+        }
+    } while (false);
+
+    if (is_bambu_open)
+    {
+        lib.Bambu_Close(tunnel);
+    }
+
+    if (tunnel != NULL)
+    {
+        lib.Bambu_Destroy(tunnel);
+        tunnel = NULL;
+    }
+
+    return ret;
+}
+
+#if defined(_MSC_VER) || defined(_WIN32)
+int __cdecl main(int argc, char * argv[])
+#else
+int main(int argc, char * argv[])
+#endif
+{
+    int ret = 0;
+    int is_bambu_init = 0;
+    char *user_id = NULL;
+    char *token = NULL;
+    char *dev_id = NULL;
+    char *region = NULL;
+    char camera_url[256] = {0};
+
+    fprintf(stderr, "by hisptoot 2022.10.24\n");
+
+#if defined(_MSC_VER) || defined(_WIN32)
+    module = LoadLibraryA("BambuSource.dll");
+    if (module == NULL)
+    {
+        fprintf(stderr, "Failed loading BambuSource.dll\n");
+        return -1;
+    }
+#else
+
+    static char lib_path[1024] = {0};
+    char *p = NULL;
+    int n = readlink("/proc/self/exe", lib_path, 1023);
+    if (NULL != (p = strrchr(lib_path, '/')))
+    {
+        *p = '\0';
+    }
+    else
+    {
+        lib_path[0] = '.';
+    }
+    strcat(lib_path, "/libBambuSource.so");
+    //fprintf(stderr, "loading %s\n", lib_path);
+    module = dlopen(lib_path, RTLD_LAZY);
+    if (module == NULL)
+    {
+        fprintf(stderr, "Failed loading libBambuSource.so\n");
+        return -1;
+    }
+#endif
+
+    GET_FUNC(Bambu_Init);
+    GET_FUNC(Bambu_Deinit);
+    GET_FUNC(Bambu_Create);
+    GET_FUNC(Bambu_Destroy);
+    GET_FUNC(Bambu_Open);
+    GET_FUNC(Bambu_StartStream);
+    GET_FUNC(Bambu_SendMessage);
+    GET_FUNC(Bambu_ReadSample);
+    GET_FUNC(Bambu_Close);
+    GET_FUNC(Bambu_SetLogger);
+    GET_FUNC(Bambu_FreeLogMsg);
+    GET_FUNC(Bambu_GetLastErrorMsg);
+    GET_FUNC(Bambu_GetStreamCount);
+    GET_FUNC(Bambu_GetDuration);
+    GET_FUNC(Bambu_GetStreamInfo);
+
+#if defined(_MSC_VER) || defined(_WIN32)
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
+
+    do
+    {
+        // ret = lib.Bambu_Init();
+        // if (0 != ret)
+        // {
+        //     ret = -1;
+        //     fprintf(stderr, "Bambu_Init failed 0x%x\n", ret);
+        //     break;
+        // }
+        is_bambu_init++;
+
+        if (0 != get_bambu_studio_user_info(&user_id, &dev_id, &token, &region))
+        {
+            ret = -1;
+            fprintf(stderr, "get_bambu_studio_user_info failed\n");
+            break;
+        }
+
+        fprintf(stderr, "region: %s user_id: %s dev_id: %s\n", region, user_id, dev_id);
+        if (0 != get_camera_url(camera_url, user_id, dev_id, token, region))
+        {
+            ret = -1;
+            fprintf(stderr, "get_camera_url failed\n");
+            break;
+        }
+        //fprintf(stderr, "camera_url: %s\n", camera_url);
+        ret = start_bambu_stream(camera_url);
+        if (!ret)
+        {
+            fprintf(stderr, "start_bambu_stream failed %d\n", ret);
+        }
+    } while (false);
+
+    if (is_bambu_init)
+    {
+        // lib.Bambu_Deinit();
+        is_bambu_init = 0;
+    }
+
+    if (user_id != NULL)
+    {
+        free(user_id);
+        user_id = NULL;
+    }
+
+    if (dev_id != NULL)
+    {
+        free(dev_id);
+        dev_id = NULL;
+    }
+
+    if (token != NULL)
+    {
+        free(token);
+        token = NULL;
+    }
+
+    return 0;
+}

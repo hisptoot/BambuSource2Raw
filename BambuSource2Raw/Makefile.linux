@@ -1,0 +1,63 @@
+cc = g++
+outdir = ../linux-build
+bin = bambusource2raw
+cflags = $(shell curl-config --cflags)
+ldflags = -ldl $(shell curl-config --libs)
+deps = cJSON_Utils.h cJSON.h BambuTunnel.h
+obj = cJSON_Utils.o cJSON.o bambusource2raw.o
+
+FFMPEG_URL=https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+FFMPEG_DOWNLOAD=/tmp/ffmpeg-release-amd64-static.tar.xz
+
+RTSP_SIMPLE_SERVER_URL=https://github.com/aler9/rtsp-simple-server/releases/download/v0.20.0/rtsp-simple-server_v0.20.0_linux_amd64.tar.gz
+RTSP_SIMPLE_SERVER_DOWNLOAD=/tmp/rtsp-simple-server_v0.20.0_linux_amd64.tar.gz
+
+BAMBU_SOURCE_URL=https://upgrade-file.bambulab.cn/studio/plugins/01.03.00.02/linux_01.03.00.02.zip
+BAMBU_SOURCE_DOWNLOAD=/tmp/bambusource_linux_01.03.00.02.zip
+
+all: $(outdir) $(outdir)/$(bin) $(outdir)/Dockerfile $(outdir)/start_rtsp_feed_docker.sh $(outdir)/start_rtsp_feed.sh $(outdir)/libBambuSource.so $(outdir)/ffmpeg $(outdir)/rtsp-simple-server
+
+$(bin): $(obj)
+	@$(cc) -o $(bin) $(obj) $(ldflags)
+
+%.o: %.c $(deps)
+	@$(cc) $(cflags) -c $< -o $@
+
+$(outdir): 
+	-mkdir -p $(outdir)
+
+$(outdir)/$(bin): $(bin)
+	cp -f $< $(outdir)
+	chmod +x $@
+
+$(outdir)/Dockerfile: Dockerfile
+	cp -f $< $(outdir)
+
+$(outdir)/start_rtsp_feed_docker.sh: start_rtsp_feed_docker.sh
+	cp -f $< $(outdir)
+	chmod +x $@
+
+$(outdir)/start_rtsp_feed.sh: start_rtsp_feed.sh
+	cp -f $< $(outdir)
+	chmod +x $@
+
+$(outdir)/ffmpeg:
+	wget -O $(FFMPEG_DOWNLOAD) $(FFMPEG_URL)
+	tar -xf $(FFMPEG_DOWNLOAD) ffmpeg-5.1.1-amd64-static/ffmpeg -O > $(outdir)/ffmpeg
+	chmod +x $(outdir)/ffmpeg
+	-rm $(FFMPEG_DOWNLOAD)
+
+$(outdir)/rtsp-simple-server:
+	wget -O $(RTSP_SIMPLE_SERVER_DOWNLOAD) $(RTSP_SIMPLE_SERVER_URL)
+	tar -xf $(RTSP_SIMPLE_SERVER_DOWNLOAD) rtsp-simple-server -O > $(outdir)/rtsp-simple-server
+	tar -xf $(RTSP_SIMPLE_SERVER_DOWNLOAD) rtsp-simple-server.yml -O > $(outdir)/rtsp-simple-server.yml
+	chmod +x $(outdir)/rtsp-simple-server
+	-rm $(RTSP_SIMPLE_SERVER_DOWNLOAD)
+
+$(outdir)/libBambuSource.so:
+	wget -O $(BAMBU_SOURCE_DOWNLOAD) $(BAMBU_SOURCE_URL)
+	unzip $(BAMBU_SOURCE_DOWNLOAD) libBambuSource.so -d $(outdir)
+	-rm $(BAMBU_SOURCE_DOWNLOAD)
+
+clean:
+	-rm -rf $(obj) $(bin) $(outdir)/$(bin)
