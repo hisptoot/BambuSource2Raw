@@ -1,4 +1,4 @@
-# *USE AT YOU OWN RISK!*
+# *USE AT YOUR OWN RISK!*
 
 # How to use
 ## Perpare
