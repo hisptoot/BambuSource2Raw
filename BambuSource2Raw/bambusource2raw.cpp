@@ -11,7 +11,9 @@
 #include <Shlobj.h> 
 #include <shlwapi.h>
 #include <io.h>
+#include "getopt.h"
 #else
+#include <getopt.h>
 #include <ctype.h>
 #include <dlfcn.h>
 #include <unistd.h>
@@ -258,7 +260,7 @@ static int get_bambu_studio_user_info(char **user_id, char **dev_id, char **toke
 }
 
 #if defined(_MSC_VER) || defined(_WIN32)
-static int get_camera_url(char camera_url[256], char *user_id, char *dev_id, char *token_str, char *region)
+static int get_camera_url(char camera_url[256], const char *user_id, const char *dev_id, const char *token_str, const char *region)
 {
     int ret = 0;
     static char site_cn[] = "api.bambulab.cn";
@@ -319,7 +321,7 @@ static int get_camera_url(char camera_url[256], char *user_id, char *dev_id, cha
         }
 
 
-        req_hnd = HttpOpenRequestA(connect_hnd, "POST", site_param, "HTTP/1.1", NULL, accept_type, INTERNET_FLAG_SECURE, 0);
+        req_hnd = HttpOpenRequestA(connect_hnd, "POST", site_param, "HTTP/1.1", NULL, accept_type, INTERNET_FLAG_SECURE | INTERNET_FLAG_NO_COOKIES, 0);
         if (req_hnd == NULL)
         {
             ret = -1;
@@ -455,6 +457,483 @@ static int get_camera_url(char camera_url[256], char *user_id, char *dev_id, cha
 
     return ret;
 }
+
+static int get_user_token(const char *user_name, const char *passwd, const char *region, char **token_str)
+{
+    int ret = 0;
+    static char site_cn[] = "bambulab.cn";
+    static char site_global[] = "bambulab.com";
+    static char site_param[] = "/api/sign-in/form";
+    const char* accept_type[] = {"application/json", NULL};
+    static char header[4096] = {0};
+    static char body[256] = {0};
+    static char token_cookie[4096] = {0};
+    int is_global_site = 0;
+    DWORD byte_read = 0;
+    DWORD byte_write = 0;
+    INTERNET_BUFFERSA inet_buf = {0};
+
+    HINTERNET inet_hnd = NULL;
+    HINTERNET connect_hnd = NULL;
+    HINTERNET req_hnd = NULL;
+    do
+    {
+        if (0 == _stricmp(region,  "cn"))
+        {
+            is_global_site = 0;
+        }
+        else
+        {
+            is_global_site = 1;
+        }
+
+        _snprintf(header, sizeof(header), 
+            "content-Type: application/json\n\r");
+        _snprintf(body, sizeof(body), 
+            "{\"account\":\"%s\",\"password\":\"%s\",\"apiError\":\"\"}", user_name, passwd);
+
+        inet_hnd = InternetOpenA("", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+        if (inet_hnd == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "InternetOpenW failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        DWORD option = 3;//  INTERNET_SUPPRESS_COOKIE_PERSIST;
+        InternetSetOption(inet_hnd, INTERNET_OPTION_SUPPRESS_BEHAVIOR, &option, sizeof(option));
+
+        connect_hnd = InternetConnectA(inet_hnd, is_global_site ? site_global : site_cn, INTERNET_DEFAULT_HTTPS_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, NULL);
+        if (connect_hnd == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "InternetConnectW failed 0x%x\n", GetLastError());
+            break;
+        }
+
+
+        req_hnd = HttpOpenRequestA(connect_hnd, "POST", site_param, "HTTP/1.1", NULL, accept_type, INTERNET_FLAG_SECURE, 0);
+        if (req_hnd == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "HttpOpenRequestA failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        if (!HttpAddRequestHeadersA(req_hnd, header, -1, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDREQ_FLAG_REPLACE))
+        {
+            ret = -1;
+            fprintf(stderr, "HttpAddRequestHeadersA failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        inet_buf.dwStructSize = sizeof(inet_buf);
+        //inet_buf.lpvBuffer = &body[0];
+        //inet_buf.dwBufferLength = strlen(body);
+        //inet_buf.dwBufferTotal = inet_buf.dwBufferLength;
+        inet_buf.dwBufferTotal = strlen(body);
+
+        if (!HttpSendRequestExA(req_hnd, &inet_buf, NULL, 0, 0))
+        {
+            ret = -1;
+            fprintf(stderr, "HttpSendRequestExA failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        if (!InternetWriteFile(req_hnd, body, strlen(body), &byte_write))
+        {
+            ret = -1;
+            fprintf(stderr, "InternetWriteFile failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        HttpEndRequestA(req_hnd, NULL, 0, 0);
+
+        static char cookies_url[256] = {0};
+        _snprintf(cookies_url, sizeof(cookies_url), "https://%s", is_global_site ? site_global : site_cn);
+
+        DWORD buf_len = sizeof(token_cookie) - sizeof('\0');
+        if (!InternetGetCookieExA(cookies_url, "token", token_cookie, &buf_len, INTERNET_COOKIE_HTTPONLY, NULL))
+        {
+            ret = -1;
+            fprintf(stderr, "InternetGetCookieExA failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        if (token_str)
+        {
+            char *s = token_cookie;
+            if (0 == strncmp(s, "token=", strlen("token=")))
+            {
+                s += strlen("token=");
+            }
+            size_t len = strlen(s) + sizeof('\0');
+            char *token_temp = (char *)malloc(len);
+            if (token_temp == NULL)
+            {
+                ret = -1;
+                fprintf(stderr, "error malloc memory for token\n");
+                break;
+            }
+
+            strcpy(token_temp, s);
+            *token_str = token_temp;
+        }
+
+        ret = 0;
+    } while (false);
+
+    if (req_hnd != NULL)
+    {
+        InternetCloseHandle(req_hnd);
+        req_hnd = NULL;
+    }
+
+    if (connect_hnd != NULL)
+    {
+        InternetCloseHandle(connect_hnd);
+        connect_hnd = NULL;
+    }
+
+    if (inet_hnd != NULL)
+    {
+        InternetCloseHandle(inet_hnd);
+        inet_hnd = NULL;
+    }
+
+    return ret;
+}
+
+static int get_user_id(const char *token, const char *region, char **user_id)
+{
+    int ret = 0;
+    static char site_cn[] = "api.bambulab.cn";
+    static char site_global[] = "api.bambulab.com";
+    static char site_param[] = "v1/user-service/my/profile";
+    const char* accept_type[] = {"application/json", NULL};
+    static char header[4096] = {0};
+    int is_global_site = 0;
+    char rsp_json[1024] = {0};
+    DWORD byte_read = 0;
+
+    HINTERNET inet_hnd = NULL;
+    HINTERNET connect_hnd = NULL;
+    HINTERNET req_hnd = NULL;
+
+    cJSON *ret_json = NULL;
+    cJSON *uid_str_item = NULL;
+
+    do
+    {
+        if (0 == _stricmp(region,  "cn"))
+        {
+            is_global_site = 0;
+        }
+        else
+        {
+            is_global_site = 1;
+        }
+
+        _snprintf(header, sizeof(header), 
+            "content-Type: application/json\n\r"
+            "Authorization: Bearer %s\n\r",
+            token);
+
+        inet_hnd = InternetOpenA("", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+        if (inet_hnd == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "InternetOpenW failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        connect_hnd = InternetConnectA(inet_hnd, is_global_site ? site_global : site_cn, INTERNET_DEFAULT_HTTPS_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, NULL);
+        if (connect_hnd == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "InternetConnectW failed 0x%x\n", GetLastError());
+            break;
+        }
+
+
+        req_hnd = HttpOpenRequestA(connect_hnd, "GET", site_param, "HTTP/1.1", NULL, accept_type, INTERNET_FLAG_SECURE | INTERNET_FLAG_NO_COOKIES, 0);
+        if (req_hnd == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "HttpOpenRequestA failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        if (!HttpAddRequestHeadersA(req_hnd, header, -1, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDREQ_FLAG_REPLACE))
+        {
+            ret = -1;
+            fprintf(stderr, "HttpAddRequestHeadersA failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        if (!HttpSendRequestExA(req_hnd, NULL, NULL, 0, 0))
+        {
+            ret = -1;
+            fprintf(stderr, "HttpSendRequestExA failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        HttpEndRequestA(req_hnd, NULL, 0, 0);
+
+        if (!InternetReadFile(req_hnd, rsp_json, sizeof(rsp_json) - sizeof('\0'), &byte_read))
+        {
+            ret = -1;
+            fprintf(stderr, "InternetReadFile failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        //fprintf(stderr, "%s\n", rsp_json);
+        if (byte_read == 0)
+        {
+            DWORD err = 0;
+            InternetGetLastResponseInfoA(&err, NULL, 0);
+            ret = -1;
+            fprintf(stderr, "InternetReadFile read empty %d\n", err);
+            break;
+        }
+
+        ret_json = cJSON_Parse(rsp_json);
+        if (ret_json == NULL)
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "Parse json failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+
+        uid_str_item = cJSON_GetObjectItem(ret_json, "uidStr");
+        if (uid_str_item == NULL 
+            || !cJSON_IsString(uid_str_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get uidStr\n %s\n", rsp_json);
+            break;
+        }
+
+        if (user_id != NULL)
+        {
+            size_t len = strlen(cJSON_GetStringValue(uid_str_item)) + sizeof('\0');
+            char *str = (char *)malloc(len);
+            strcpy(str, cJSON_GetStringValue(uid_str_item));
+            *user_id = str;
+        }
+
+        ret = 0;
+    } while (false);
+
+    if (ret_json != NULL)
+    {
+        cJSON_Delete(ret_json);
+        ret_json = NULL;
+    }
+
+    if (req_hnd != NULL)
+    {
+        InternetCloseHandle(req_hnd);
+        req_hnd = NULL;
+    }
+
+    if (connect_hnd != NULL)
+    {
+        InternetCloseHandle(connect_hnd);
+        connect_hnd = NULL;
+    }
+
+    if (inet_hnd != NULL)
+    {
+        InternetCloseHandle(inet_hnd);
+        inet_hnd = NULL;
+    }
+
+    return ret;
+}
+
+static int get_first_dev_id(const char *token, const char *region, char **dev_id)
+{
+    int ret = 0;
+    static char site_cn[] = "api.bambulab.cn";
+    static char site_global[] = "api.bambulab.com";
+    static char site_param[] = "v1/iot-service/api/user/bind";
+    const char* accept_type[] = {"application/json", NULL};
+    static char header[4096] = {0};
+    int is_global_site = 0;
+    char rsp_json[1024] = {0};
+    DWORD byte_read = 0;
+
+    HINTERNET inet_hnd = NULL;
+    HINTERNET connect_hnd = NULL;
+    HINTERNET req_hnd = NULL;
+
+    cJSON *ret_json = NULL;
+    cJSON *message_item = NULL;
+    cJSON *devices_item = NULL;
+    cJSON *device_info_item = NULL;
+    cJSON *dev_id_item = NULL;
+
+    do
+    {
+        if (0 == _stricmp(region,  "cn"))
+        {
+            is_global_site = 0;
+        }
+        else
+        {
+            is_global_site = 1;
+        }
+
+        _snprintf(header, sizeof(header), 
+            "content-Type: application/json\n\r"
+            "Authorization: Bearer %s\n\r",
+            token);
+
+        inet_hnd = InternetOpenA("", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+        if (inet_hnd == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "InternetOpenW failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        connect_hnd = InternetConnectA(inet_hnd, is_global_site ? site_global : site_cn, INTERNET_DEFAULT_HTTPS_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, NULL);
+        if (connect_hnd == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "InternetConnectW failed 0x%x\n", GetLastError());
+            break;
+        }
+
+
+        req_hnd = HttpOpenRequestA(connect_hnd, "GET", site_param, "HTTP/1.1", NULL, accept_type, INTERNET_FLAG_SECURE |  INTERNET_FLAG_NO_COOKIES, 0);
+        if (req_hnd == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "HttpOpenRequestA failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        if (!HttpAddRequestHeadersA(req_hnd, header, -1, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDREQ_FLAG_REPLACE))
+        {
+            ret = -1;
+            fprintf(stderr, "HttpAddRequestHeadersA failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        if (!HttpSendRequestExA(req_hnd, NULL, NULL, 0, 0))
+        {
+            ret = -1;
+            fprintf(stderr, "HttpSendRequestExA failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        HttpEndRequestA(req_hnd, NULL, 0, 0);
+
+        if (!InternetReadFile(req_hnd, rsp_json, sizeof(rsp_json) - sizeof('\0'), &byte_read))
+        {
+            ret = -1;
+            fprintf(stderr, "InternetReadFile failed 0x%x\n", GetLastError());
+            break;
+        }
+
+        //fprintf(stderr, "%s\n", rsp_json);
+        if (byte_read == 0)
+        {
+            DWORD err = 0;
+            InternetGetLastResponseInfoA(&err, NULL, 0);
+            ret = -1;
+            fprintf(stderr, "InternetReadFile read empty %d\n", err);
+            break;
+        }
+
+        ret_json = cJSON_Parse(rsp_json);
+        if (ret_json == NULL)
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "Parse json failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+
+        message_item = cJSON_GetObjectItem(ret_json, "message");
+        if (message_item == NULL 
+            || !cJSON_IsString(message_item)
+            || 0 != strcmp(cJSON_GetStringValue(message_item), "success"))
+        {
+            ret = -1;
+            fprintf(stderr, "iot req failed\n %s\n", rsp_json);
+            break;
+        }
+
+        devices_item = cJSON_GetObjectItem(ret_json, "devices");
+        if (devices_item == NULL 
+            || !cJSON_IsArray(devices_item)
+            || cJSON_GetArraySize(devices_item) <= 0)
+        {
+            ret = -1;
+            fprintf(stderr, "failed get devices list\n %s\n", rsp_json);
+            break;
+        }
+
+        device_info_item = cJSON_GetArrayItem(devices_item, 0);
+        if (device_info_item == NULL 
+            || !cJSON_IsObject(device_info_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get device info object\n %s\n", rsp_json);
+            break;
+        }
+
+        dev_id_item = cJSON_GetObjectItem(device_info_item, "dev_id");
+        if (dev_id_item == NULL 
+            || !cJSON_IsString(dev_id_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get dev_id\n %s\n", rsp_json);
+            break;
+        }
+
+        if (dev_id != NULL)
+        {
+            size_t len = strlen(cJSON_GetStringValue(dev_id_item)) + sizeof('\0');
+            char *str = (char *)malloc(len);
+            strcpy(str, cJSON_GetStringValue(dev_id_item));
+            *dev_id = str;
+        }
+
+        ret = 0;
+    } while (false);
+
+    if (req_hnd != NULL)
+    {
+        InternetCloseHandle(req_hnd);
+        req_hnd = NULL;
+    }
+
+    if (connect_hnd != NULL)
+    {
+        InternetCloseHandle(connect_hnd);
+        connect_hnd = NULL;
+    }
+
+    if (inet_hnd != NULL)
+    {
+        InternetCloseHandle(inet_hnd);
+        inet_hnd = NULL;
+    }
+
+    if (ret_json != NULL)
+    {
+        cJSON_Delete(ret_json);
+        ret_json = NULL;
+    }
+
+    return ret;
+}
+
 #else
 
 struct bambu_curl_memory_data
@@ -609,12 +1088,460 @@ int curl_trace(CURL *handle, curl_infotype type,
   return 0;
 }
 
-static int get_camera_url(char camera_url[256], char *user_id, char *dev_id, char *token_str, char *region)
+static int get_user_token(const char *user_name, const char *passwd, const char *region, char **token_str)
+{
+    int ret = 0;
+    static char site_cn[] = "https://bambulab.cn/api/sign-in/form";
+    static char site_global[] = "https://bambulab.com/api/sign-in/form";
+    static char body[256] = {0};
+    int is_global_site = 0;
+    CURL *curl = NULL;
+    CURLcode res;
+    struct curl_slist *header_list = NULL;
+    struct curl_slist *cookies = NULL;
+
+    do
+    {
+        if (0 == _stricmp(region,  "cn"))
+        {
+            is_global_site = 0;
+        }
+        else
+        {
+            is_global_site = 1;
+        }
+
+        _snprintf(body, sizeof(body), 
+            "{\"account\":\"%s\",\"password\":\"%s\",\"apiError\":\"\"}", user_name, passwd);
+
+        curl_global_init(CURL_GLOBAL_DEFAULT);
+
+        curl = curl_easy_init();
+        if (curl == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "curl_easy_init failed\n");
+            break;
+        }
+
+        curl_easy_setopt(curl, CURLOPT_URL, is_global_site ? site_global : site_cn);
+
+        /* enable the cookie engine */
+        curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");
+
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+
+        header_list = curl_slist_append(header_list, 
+            "Content-Type: application/json");
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(body));
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, &body[0]);
+
+        res = curl_easy_perform(curl);
+        if(res != CURLE_OK)
+        {
+            ret = -1;
+            fprintf(stderr, "curl_easy_perform() failed: %s\n",
+                curl_easy_strerror(res));
+            break;
+        }
+
+        res = curl_easy_getinfo(curl, CURLINFO_COOKIELIST, &cookies);
+        if (res)
+        {
+            ret = -1;
+            fprintf(stderr, "curl get cookies failed: %s\n",
+                curl_easy_strerror(res));
+            break;
+        }
+
+        if (cookies == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "cookies is empty\n");
+            break;
+        }
+
+        struct curl_slist *each = cookies;
+        const char *cookies_token_str = NULL;
+        while (each) 
+        {
+            const char *s = NULL;
+            const char *sep = "\t";
+            size_t idx = 0;
+            s = strstr(each->data, sep);
+            if (s == NULL)
+            {
+                sep = " ";
+                s = strstr(each->data, sep);
+            }
+            do
+            {
+                if (*(s + 1) == '\0')
+                {
+                    break;
+                }
+
+                if (*(s + 1) == sep[0])
+                {
+                    continue;
+                }
+                idx++;
+
+                if (idx < 5)
+                {
+                    continue;
+                }
+
+                if (idx == 5)
+                {
+                    if (0 != strncmp(s + 1, "token", 5)) 
+                    {
+                        break;
+                    }
+                }
+                else if (idx == 6)
+                {
+                    cookies_token_str = s + 1;
+                    break;
+                }
+            } while((s = strstr(s + 1, sep)));
+
+            if (cookies_token_str != NULL)
+            {
+                break;
+            }
+            each = each->next;
+        }
+
+        if (cookies_token_str == NULL)
+        {
+            fprintf(stderr, "error get token\n");
+            ret = -1;
+            break;
+        }
+
+        if (token_str)
+        {
+            size_t len = strlen(cookies_token_str) + sizeof('\0');
+            char *token_temp = (char *)malloc(len);
+            if (token_temp == NULL)
+            {
+                ret = -1;
+                fprintf(stderr, "error malloc memory for token\n");
+                break;
+            }
+
+            strcpy(token_temp, cookies_token_str);
+            *token_str = token_temp;
+        }
+
+        ret = 0;
+    } while (false);
+
+    if (cookies != NULL)
+    {
+        curl_slist_free_all(cookies);
+        cookies = NULL;
+    }
+
+    if (header_list != NULL)
+    {
+        curl_slist_free_all(header_list);
+        header_list = NULL;
+    }
+
+    if (curl != NULL)
+    {
+        curl_easy_cleanup(curl);
+        curl = NULL;
+    }
+    
+    curl_global_cleanup();
+
+    return ret;
+}
+
+static int get_user_id(const char *token, const char *region, char **user_id)
+{
+    int ret = 0;
+    static char site_cn[] = "https://api.bambulab.cn/v1/user-service/my/profile";
+    static char site_global[] = "https://api.bambulab.com/v1/user-service/my/profile";
+    static char header_auth[4096] = {0};
+    static char body[256] = {0};
+    int is_global_site = 0;
+    static char rsp_json[1024] = {0};
+    CURL *curl = NULL;
+    CURLcode res;
+    struct curl_slist *header_list = NULL;
+
+    cJSON *ret_json = NULL;
+    cJSON *uid_str_item = NULL;
+
+    do
+    {
+        if (0 == _stricmp(region,  "cn"))
+        {
+            is_global_site = 0;
+        }
+        else
+        {
+            is_global_site = 1;
+        }
+
+        _snprintf(header_auth, sizeof(header_auth), 
+            "Authorization: Bearer %s",
+            token);
+
+        curl_global_init(CURL_GLOBAL_DEFAULT);
+
+        curl = curl_easy_init();
+        if (curl == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "curl_easy_init failed\n");
+            break;
+        }
+
+        curl_easy_setopt(curl, CURLOPT_URL, is_global_site ? site_global : site_cn);
+
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+
+        header_list = curl_slist_append(header_list, 
+            "Content-Type: application/json");
+        header_list = curl_slist_append(header_list, "accept: application/json");
+        header_list = curl_slist_append(header_list, header_auth);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+
+        struct bambu_curl_memory_data rsp_data = {0};
+        rsp_data.data = &rsp_json[0];
+        rsp_data.total_size = sizeof(rsp_json) - sizeof('\0');
+        rsp_data.pos = 0;
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, rsp_write_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&rsp_data);
+
+        res = curl_easy_perform(curl);
+        if(res != CURLE_OK)
+        {
+            ret = -1;
+            fprintf(stderr, "curl_easy_perform() failed: %s\n",
+                curl_easy_strerror(res));
+            break;
+        }
+
+        ret_json = cJSON_Parse(rsp_json);
+        if (ret_json == NULL)
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "Parse json failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+
+        uid_str_item = cJSON_GetObjectItem(ret_json, "uidStr");
+        if (uid_str_item == NULL 
+            || !cJSON_IsString(uid_str_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get uidStr\n %s\n", rsp_json);
+            break;
+        }
+
+        if (user_id != NULL)
+        {
+            size_t len = strlen(cJSON_GetStringValue(uid_str_item)) + sizeof('\0');
+            char *str = (char *)malloc(len);
+            strcpy(str, cJSON_GetStringValue(uid_str_item));
+            *user_id = str;
+        }
+
+        ret = 0;
+    } while (false);
+
+    if (ret_json != NULL)
+    {
+        cJSON_Delete(ret_json);
+        ret_json = NULL;
+    }
+
+    if (header_list != NULL)
+    {
+        curl_slist_free_all(header_list);
+        header_list = NULL;
+    }
+
+    if (curl != NULL)
+    {
+        curl_easy_cleanup(curl);
+        curl = NULL;
+    }
+    
+    curl_global_cleanup();
+
+    return ret;
+}
+
+static int get_first_dev_id(const char *token, const char *region, char **dev_id)
+{
+    int ret = 0;
+    static char site_cn[] = "https://api.bambulab.cn/v1/iot-service/api/user/bind";
+    static char site_global[] = "https://api.bambulab.com/v1/iot-service/api/user/bind";
+    static char header_auth[4096] = {0};
+    static char body[256] = {0};
+    int is_global_site = 0;
+    static char rsp_json[1024] = {0};
+    CURL *curl = NULL;
+    CURLcode res;
+    struct curl_slist *header_list = NULL;
+
+    cJSON *ret_json = NULL;
+    cJSON *message_item = NULL;
+    cJSON *devices_item = NULL;
+    cJSON *device_info_item = NULL;
+    cJSON *dev_id_item = NULL;
+
+    do
+    {
+        if (0 == _stricmp(region,  "cn"))
+        {
+            is_global_site = 0;
+        }
+        else
+        {
+            is_global_site = 1;
+        }
+
+        _snprintf(header_auth, sizeof(header_auth), 
+            "Authorization: Bearer %s",
+            token);
+
+        curl_global_init(CURL_GLOBAL_DEFAULT);
+
+        curl = curl_easy_init();
+        if (curl == NULL)
+        {
+            ret = -1;
+            fprintf(stderr, "curl_easy_init failed\n");
+            break;
+        }
+
+        curl_easy_setopt(curl, CURLOPT_URL, is_global_site ? site_global : site_cn);
+
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+
+        header_list = curl_slist_append(header_list, 
+            "Content-Type: application/json");
+        header_list = curl_slist_append(header_list, "accept: application/json");
+        header_list = curl_slist_append(header_list, header_auth);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+
+        struct bambu_curl_memory_data rsp_data = {0};
+        rsp_data.data = &rsp_json[0];
+        rsp_data.total_size = sizeof(rsp_json) - sizeof('\0');
+        rsp_data.pos = 0;
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, rsp_write_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&rsp_data);
+
+        res = curl_easy_perform(curl);
+        if(res != CURLE_OK)
+        {
+            ret = -1;
+            fprintf(stderr, "curl_easy_perform() failed: %s\n",
+                curl_easy_strerror(res));
+            break;
+        }
+
+        ret_json = cJSON_Parse(rsp_json);
+        if (ret_json == NULL)
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "Parse json failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+
+        message_item = cJSON_GetObjectItem(ret_json, "message");
+        if (message_item == NULL 
+            || !cJSON_IsString(message_item)
+            || 0 != strcmp(cJSON_GetStringValue(message_item), "success"))
+        {
+            ret = -1;
+            fprintf(stderr, "iot req failed\n %s\n", rsp_json);
+            break;
+        }
+
+        devices_item = cJSON_GetObjectItem(ret_json, "devices");
+        if (devices_item == NULL 
+            || !cJSON_IsArray(devices_item)
+            || cJSON_GetArraySize(devices_item) <= 0)
+        {
+            ret = -1;
+            fprintf(stderr, "failed get devices list\n %s\n", rsp_json);
+            break;
+        }
+
+        device_info_item = cJSON_GetArrayItem(devices_item, 0);
+        if (device_info_item == NULL 
+            || !cJSON_IsObject(device_info_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get device info object\n %s\n", rsp_json);
+            break;
+        }
+
+        dev_id_item = cJSON_GetObjectItem(device_info_item, "dev_id");
+        if (dev_id_item == NULL 
+            || !cJSON_IsString(dev_id_item))
+        {
+            ret = -1;
+            fprintf(stderr, "failed get dev_id\n %s\n", rsp_json);
+            break;
+        }
+
+        if (dev_id != NULL)
+        {
+            size_t len = strlen(cJSON_GetStringValue(dev_id_item)) + sizeof('\0');
+            char *str = (char *)malloc(len);
+            strcpy(str, cJSON_GetStringValue(dev_id_item));
+            *dev_id = str;
+        }
+
+        ret = 0;
+    } while (false);
+
+    if (ret_json != NULL)
+    {
+        cJSON_Delete(ret_json);
+        ret_json = NULL;
+    }
+
+    if (header_list != NULL)
+    {
+        curl_slist_free_all(header_list);
+        header_list = NULL;
+    }
+
+    if (curl != NULL)
+    {
+        curl_easy_cleanup(curl);
+        curl = NULL;
+    }
+    
+    curl_global_cleanup();
+
+    return ret;
+}
+
+static int get_camera_url(char camera_url[256], const char *user_id, const char *dev_id, const char *token_str, const char *region)
 {
     int ret = 0;
     static char site_cn[] = "https://api.bambulab.cn/v1/iot-service/api/user/ttcode";
     static char site_global[] = "https://api.bambulab.com/v1/iot-service/api/user/ttcode";
-    const char* accept_type[] = {"application/json", NULL};
     static char header_auth[4096] = {0};
     static char header_userid[256] = {0};
     static char body[256] = {0};
@@ -937,15 +1864,56 @@ int __cdecl main(int argc, char * argv[])
 int main(int argc, char * argv[])
 #endif
 {
+    static char region_cn[] = "cn";
+    static char region_us[] = "us";
     int ret = 0;
     int is_bambu_init = 0;
+    char *user_name = NULL;
+    char *passwd = NULL;
     char *user_id = NULL;
     char *token = NULL;
     char *dev_id = NULL;
-    char *region = NULL;
+    int is_region_specified = 0;
+    char *region = region_us;
     char camera_url[256] = {0};
 
-    fprintf(stderr, "by hisptoot 2022.10.24\n");
+    fprintf(stderr, "by hisptoot 2022.10.28\n");
+
+    int option;
+    while ((option = getopt(argc, argv, "u:p:t:r:i:d:")) !=
+           -1) 
+    {
+        switch (option) 
+        {
+        case 'u':
+            user_name = optarg;
+            fprintf(stderr, "user_name: %s\n", optarg);
+            break;
+        case 'p':
+            fprintf(stderr, "passwd specified by user\n");
+            passwd = optarg;
+            break;
+        case 't':
+            fprintf(stderr, "token specified by user\n");
+            token = optarg;
+            break;
+        case 'r':
+            fprintf(stderr, "region: %s\n", optarg);
+            is_region_specified++;
+            region = optarg;
+            break;
+        case 'i':
+            fprintf(stderr, "user_id: %s\n", optarg);
+            user_id = optarg;
+            break;
+        case 'd':
+            fprintf(stderr, "dev_id: %s\n", optarg);
+            dev_id = optarg;
+            break;
+        default:
+            break;
+        }
+    }
 
 #if defined(_MSC_VER) || defined(_WIN32)
     module = LoadLibraryA("BambuSource.dll");
@@ -1008,11 +1976,84 @@ int main(int argc, char * argv[])
         // }
         is_bambu_init++;
 
-        if (0 != get_bambu_studio_user_info(&user_id, &dev_id, &token, &region))
+        if (token == NULL) 
         {
-            ret = -1;
-            fprintf(stderr, "get_bambu_studio_user_info failed\n");
-            break;
+            if (user_name != NULL && passwd != NULL) 
+            {
+                fprintf(stderr, "getting token by login\n");
+                if (0 != get_user_token(user_name, passwd, region, &token))
+                {
+                    fprintf(stderr, "get_user_token by login request failed\n");
+                }
+            } 
+
+            if (token == NULL)
+            {
+                char *temp_user_id = NULL;
+                char *temp_dev_id = NULL;
+                char *temp_region = NULL;
+                fprintf(stderr, "getting user info by BambuNetworkEngine.conf\n");
+                if (0 != get_bambu_studio_user_info(&temp_user_id, &temp_dev_id, &token, &temp_region)) 
+                {
+                    ret = -1;
+                    fprintf(stderr, "get_bambu_studio_user_info failed\n");
+                    break;
+                }
+
+                if (user_id == NULL) 
+                {
+                    user_id = temp_user_id;
+                } 
+                else 
+                {
+                    free(temp_user_id);
+                    temp_user_id = NULL;
+                }
+
+                if (dev_id == NULL) 
+                {
+                    dev_id = temp_dev_id;
+                } 
+                else 
+                {
+                    free(temp_dev_id);
+                    temp_dev_id = NULL;
+                }
+
+                if (!is_region_specified) 
+                {
+                    region = temp_region;
+                } 
+                else 
+                {
+                    free(temp_region);
+                    temp_region = NULL;
+                }
+            }
+        }
+
+        if (user_id == NULL) 
+        {
+            fprintf(stderr, "getting user_id by token\n");
+            get_user_id(token, region, &user_id);
+            if (user_id == NULL) 
+            {
+                fprintf(stderr, "failed get_user_id\n");
+                return 0;
+            }
+            fprintf(stderr, "user_id: %s\n", user_id);
+        }
+
+        if (dev_id == NULL) 
+        {
+            fprintf(stderr, "getting dev_id by token\n");
+            get_first_dev_id(token, region, &dev_id);
+            if (dev_id == NULL) 
+            {
+                fprintf(stderr, "failed get_dev_id\n");
+                return 0;
+            }
+            fprintf(stderr, "dev_id: %s\n", dev_id);
         }
 
         fprintf(stderr, "region: %s user_id: %s dev_id: %s\n", region, user_id, dev_id);
