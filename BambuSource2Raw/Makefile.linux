@@ -1,5 +1,5 @@
 cc = g++
-outdir = ../linux-build
+outdir ?= ../linux-build
 bin = bambusource2raw
 cflags = $(shell curl-config --cflags)
 ldflags = -ldl $(shell curl-config --libs)
