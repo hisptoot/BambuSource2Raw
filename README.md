@@ -7,6 +7,18 @@
 3. Close BambuStudio and it will generate `BambuNetworkEngine.conf` under `X:\Users\[user_name]\AppData\Roaming\BambuStudio`
 4. Download release archive of this project or just compile your own.
         
+
+## Docker Setup
+
+Quick and easy way to setup BambuSource2Raw is through the provided Docker builder.
+
+```bash
+git clone https://github.com/hisptoot/BambuSource2Raw
+cd BambuSource2Raw/BambuSource2Raw/
+docker build -t bblrtsp:v1 .
+docker run --rm --name BambuRTSP-1 -p 8554:8554 -v "${HOME}/.config/BambuStudio:/bambu-bin/cfg:ro" bblrtsp:v1
+```
+
 ## Linux
 1. 
         apt-get install -y libcurl4

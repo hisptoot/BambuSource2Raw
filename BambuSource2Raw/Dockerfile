@@ -1,13 +1,22 @@
-FROM ubuntu:18.04
-RUN apt-get update && apt-get install -y curl
-RUN mkdir -p /bambu-bin
-RUN mkdir -p /bambu-bin/cfg
-WORKDIR /bambu-bin
-COPY bambusource2raw /bambu-bin/bambusource2raw
-COPY start_rtsp_feed_docker.sh /bambu-bin/start_rtsp_feed_docker.sh
-COPY ffmpeg /bambu-bin/ffmpeg
-COPY rtsp-simple-server /bambu-bin/rtsp-simple-server
-COPY rtsp-simple-server.yml /bambu-bin/rtsp-simple-server.yml
-COPY libBambuSource.so /bambu-bin/libBambuSource.so
+FROM debian:latest as builder
+RUN set -e; apt-get update; apt-get install -y curl libcurl4 unzip libcurl4-openssl-dev build-essential; \
+  apt-get clean; rm -rf /var/cache/apt;
+RUN mkdir -p /app/build
+WORKDIR /app
+COPY Makefile.linux ./
+ENV outdir="./build"
+ENV MAKEFILES="./Makefile.linux"
+RUN make libBambuSource.so
+RUN make ffmpeg
+RUN make rtsp-simple-server
+COPY *.c *.h *.cpp ./
+RUN make bambusource2raw
+
+FROM debian:latest as runner
+COPY --from=builder /app/build/* /usr/local/bin/
+COPY --from=builder /app/build/*.yml /bambu-bin/
+RUN set -e; apt-get update; apt-get install -y libcurl4 curl; \
+  apt-get clean; rm -rf /var/cache/apt;
+COPY docker_entrypoint.sh /usr/local/bin
 EXPOSE 8554
-CMD ["/bin/bash", "/bambu-bin/start_rtsp_feed_docker.sh"]
+ENTRYPOINT ["docker_entrypoint.sh"]
