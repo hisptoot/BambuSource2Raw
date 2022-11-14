@@ -42,20 +42,20 @@ $(outdir)/start_rtsp_feed.sh: start_rtsp_feed.sh
 	chmod +x $@
 
 $(outdir)/ffmpeg:
-	wget -O $(FFMPEG_DOWNLOAD) $(FFMPEG_URL)
-	tar -xf $(FFMPEG_DOWNLOAD) ffmpeg-5.1.1-amd64-static/ffmpeg -O > $(outdir)/ffmpeg
+	curl -LqSs -o "$(FFMPEG_DOWNLOAD)" $(FFMPEG_URL)
+	tar -xf "$(FFMPEG_DOWNLOAD)" ffmpeg-5.1.1-amd64-static/ffmpeg -O > $(outdir)/ffmpeg
 	chmod +x $(outdir)/ffmpeg
 	-rm $(FFMPEG_DOWNLOAD)
 
 $(outdir)/rtsp-simple-server:
-	wget -O $(RTSP_SIMPLE_SERVER_DOWNLOAD) $(RTSP_SIMPLE_SERVER_URL)
+	curl -LqSs -o "$(RTSP_SIMPLE_SERVER_DOWNLOAD)" $(RTSP_SIMPLE_SERVER_URL)
 	tar -xf $(RTSP_SIMPLE_SERVER_DOWNLOAD) rtsp-simple-server -O > $(outdir)/rtsp-simple-server
 	tar -xf $(RTSP_SIMPLE_SERVER_DOWNLOAD) rtsp-simple-server.yml -O > $(outdir)/rtsp-simple-server.yml
 	chmod +x $(outdir)/rtsp-simple-server
 	-rm $(RTSP_SIMPLE_SERVER_DOWNLOAD)
 
 $(outdir)/libBambuSource.so:
-	wget -O $(BAMBU_SOURCE_DOWNLOAD) $(BAMBU_SOURCE_URL)
+	curl -LqSs -o "$(BAMBU_SOURCE_DOWNLOAD)" "$(BAMBU_SOURCE_URL)"
 	unzip $(BAMBU_SOURCE_DOWNLOAD) libBambuSource.so -d $(outdir)
 	-rm $(BAMBU_SOURCE_DOWNLOAD)
 
