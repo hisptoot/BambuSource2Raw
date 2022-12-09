@@ -26,6 +26,9 @@
 
 #define BAMBUE_START_STREAM_RETRY_COUNT (40)
 
+/* ret 0 means stop, 1 means continue */
+typedef int (*enum_dev_lst_cb)(void *ctx, cJSON *device_info_item);
+
 static int get_bambu_studio_user_info(char **user_id, char **dev_id, char **token, char **region)
 {
     int ret = 0;
@@ -753,7 +756,7 @@ static int get_user_id(const char *token, const char *region, char **user_id)
     return ret;
 }
 
-static int get_first_dev_id(const char *token, const char *region, char **dev_id)
+static int enum_dev_lst(const char *token, const char *region, enum_dev_lst_cb callback, void *ctx)
 {
     int ret = 0;
     static char site_cn[] = "api.bambulab.cn";
@@ -773,7 +776,6 @@ static int get_first_dev_id(const char *token, const char *region, char **dev_id
     cJSON *message_item = NULL;
     cJSON *devices_item = NULL;
     cJSON *device_info_item = NULL;
-    cJSON *dev_id_item = NULL;
 
     do
     {
@@ -878,33 +880,24 @@ static int get_first_dev_id(const char *token, const char *region, char **dev_id
             break;
         }
 
-        device_info_item = cJSON_GetArrayItem(devices_item, 0);
-        if (device_info_item == NULL 
-            || !cJSON_IsObject(device_info_item))
+        size_t item_count = cJSON_GetArraySize(devices_item);
+        size_t i = 0;
+        for (i = 0; i < item_count; i++)
         {
-            ret = -1;
-            fprintf(stderr, "failed get device info object\n %s\n", rsp_json);
-            break;
-        }
+            device_info_item = cJSON_GetArrayItem(devices_item, i);
+            if (device_info_item == NULL 
+                || !cJSON_IsObject(device_info_item))
+            {
+                ret = -1;
+                fprintf(stderr, "failed get device info object idx: %u\n %s\n", (unsigned int)i, rsp_json);
+                break;
+            }
 
-        dev_id_item = cJSON_GetObjectItem(device_info_item, "dev_id");
-        if (dev_id_item == NULL 
-            || !cJSON_IsString(dev_id_item))
-        {
-            ret = -1;
-            fprintf(stderr, "failed get dev_id\n %s\n", rsp_json);
-            break;
+            if (!callback(ctx, device_info_item))
+            {
+                break;
+            }
         }
-
-        if (dev_id != NULL)
-        {
-            size_t len = strlen(cJSON_GetStringValue(dev_id_item)) + sizeof('\0');
-            char *str = (char *)malloc(len);
-            strcpy(str, cJSON_GetStringValue(dev_id_item));
-            *dev_id = str;
-        }
-
-        ret = 0;
     } while (false);
 
     if (req_hnd != NULL)
@@ -1385,7 +1378,7 @@ static int get_user_id(const char *token, const char *region, char **user_id)
     return ret;
 }
 
-static int get_first_dev_id(const char *token, const char *region, char **dev_id)
+static int enum_dev_lst(const char *token, const char *region, enum_dev_lst_cb callback, void *ctx)
 {
     int ret = 0;
     static char site_cn[] = "https://api.bambulab.cn/v1/iot-service/api/user/bind";
@@ -1485,33 +1478,24 @@ static int get_first_dev_id(const char *token, const char *region, char **dev_id
             break;
         }
 
-        device_info_item = cJSON_GetArrayItem(devices_item, 0);
-        if (device_info_item == NULL 
-            || !cJSON_IsObject(device_info_item))
+        size_t item_count = cJSON_GetArraySize(devices_item);
+        size_t i = 0;
+        for (i = 0; i < item_count; i++)
         {
-            ret = -1;
-            fprintf(stderr, "failed get device info object\n %s\n", rsp_json);
-            break;
-        }
+            device_info_item = cJSON_GetArrayItem(devices_item, i);
+            if (device_info_item == NULL 
+                || !cJSON_IsObject(device_info_item))
+            {
+                ret = -1;
+                fprintf(stderr, "failed get device info object idx: %u\n %s\n", (unsigned int)i, rsp_json);
+                break;
+            }
 
-        dev_id_item = cJSON_GetObjectItem(device_info_item, "dev_id");
-        if (dev_id_item == NULL 
-            || !cJSON_IsString(dev_id_item))
-        {
-            ret = -1;
-            fprintf(stderr, "failed get dev_id\n %s\n", rsp_json);
-            break;
+            if (!callback(ctx, device_info_item))
+            {
+                break;
+            }
         }
-
-        if (dev_id != NULL)
-        {
-            size_t len = strlen(cJSON_GetStringValue(dev_id_item)) + sizeof('\0');
-            char *str = (char *)malloc(len);
-            strcpy(str, cJSON_GetStringValue(dev_id_item));
-            *dev_id = str;
-        }
-
-        ret = 0;
     } while (false);
 
     if (ret_json != NULL)
@@ -1713,6 +1697,199 @@ static int get_camera_url(char camera_url[256], const char *user_id, const char 
 }
 #endif
 
+static int get_first_dev_id_enum_func(void *ctx, cJSON *device_info_item)
+{
+    char **dev_id = (char **)ctx;
+    cJSON *dev_id_item = NULL;
+    dev_id_item = cJSON_GetObjectItem(device_info_item, "dev_id");
+    if (dev_id_item == NULL 
+        || !cJSON_IsString(dev_id_item))
+    {
+        fprintf(stderr, "failed get dev_id\n");
+        return 0;
+    }
+
+    if (dev_id != NULL)
+    {
+        size_t len = strlen(cJSON_GetStringValue(dev_id_item)) + sizeof('\0');
+        char *str = (char *)malloc(len);
+        strcpy(str, cJSON_GetStringValue(dev_id_item));
+        *dev_id = str;
+    }
+
+    return 0;
+}
+
+static int get_first_dev_id(const char *token, const char *region, char **dev_id)
+{
+    return enum_dev_lst(token, region, get_first_dev_id_enum_func, dev_id);
+}
+
+static int list_machine_info_enum_func(void *ctx, cJSON *device_info_item)
+{
+    char **dev_id = (char **)ctx;
+    cJSON *dev_id_item = NULL;
+    cJSON *dev_name_item = NULL;
+    cJSON *dev_product_name_item = NULL;
+    cJSON *dev_access_code_item = NULL;
+    dev_id_item = cJSON_GetObjectItem(device_info_item, "dev_id");
+    if (dev_id_item == NULL 
+        || !cJSON_IsString(dev_id_item))
+    {
+        fprintf(stderr, "failed get dev_id\n");
+        return 1;
+    }
+
+    fprintf(stderr, "---------------------\n");
+    fprintf(stderr, "  dev_id: %s\n", cJSON_GetStringValue(dev_id_item));
+
+    dev_name_item = cJSON_GetObjectItem(device_info_item, "name");
+    if (dev_name_item != NULL)
+    {
+        fprintf(stderr, "  name: %s\n", cJSON_GetStringValue(dev_name_item));
+    }
+
+    dev_product_name_item = cJSON_GetObjectItem(device_info_item, "dev_product_name");
+    if (dev_product_name_item != NULL)
+    {
+        fprintf(stderr, "  product: %s\n", cJSON_GetStringValue(dev_product_name_item));
+    }
+
+    dev_access_code_item = cJSON_GetObjectItem(device_info_item, "dev_access_code");
+    if (dev_access_code_item != NULL)
+    {
+        fprintf(stderr, "  access_code: %s\n", cJSON_GetStringValue(dev_access_code_item));
+    }
+
+    return 1;
+}
+
+static int list_machine_info(const char *token, const char *region)
+{
+    return enum_dev_lst(token, region, list_machine_info_enum_func, NULL);
+}
+
+int gen_simple_bambu_cfg_file(const char *user_id, const char *region, const char *token,  const char *dev_id)
+{
+    int ret = 0;
+    char bambu_cfg_path[256 + 1] = "BambuNetworkEngine.conf";
+    FILE *cfg_file = NULL;
+    char *cfg_data = NULL;
+    cJSON *cfg_json = NULL;
+    cJSON *last_monitor_machine_item = NULL;
+    cJSON *user_item = NULL;
+    cJSON *user_id_item = NULL;
+    cJSON *token_item = NULL;
+    cJSON *country_code_item = NULL;
+    char *json_str = NULL;
+
+    do
+    {
+        cfg_file = fopen(bambu_cfg_path, "w");
+        if (cfg_file == NULL)
+        {
+            fprintf(stderr, "fopen failed\n");
+            break;
+        }
+        cfg_json = cJSON_CreateObject();
+        if (cfg_json == NULL)
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "create cfg json failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+
+        if (cJSON_AddStringToObject(cfg_json, "country_code", region) == NULL) 
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "add country_code to json failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+
+        if (cJSON_AddStringToObject(cfg_json, "last_monitor_machine", dev_id) == NULL) 
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "add last_monitor_machine to json failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+
+        cJSON *user_item = cJSON_CreateObject();
+        if (user_item == NULL)
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "create user json object failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+        if (cJSON_AddStringToObject(user_item, "user_id", user_id) == NULL) 
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "add user_id to json failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+        if (cJSON_AddStringToObject(user_item, "token", token) == NULL) 
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "add token to json failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+
+        if (!cJSON_AddItemToObject(cfg_json, "user", user_item))
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "add user object to json failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+
+        json_str = cJSON_Print(cfg_json);
+        if (json_str == NULL)
+        {
+            const char *error_ptr = cJSON_GetErrorPtr();
+            ret = -1;
+            fprintf(stderr, "cfg json print failed %s\n", error_ptr ? error_ptr : "");
+            break;
+        }
+
+        size_t cfg_file_size = strlen(json_str) + sizeof('\0');
+        fwrite(json_str, 1, cfg_file_size, cfg_file);
+        fflush(cfg_file);
+
+        ret = 0;
+    } while(false);
+
+    if (json_str != NULL)
+    {
+        free(json_str);
+        json_str = NULL;
+    }
+
+    if (cfg_json != NULL)
+    {
+        cJSON_Delete(cfg_json);
+        cfg_json = NULL;
+    }
+
+    if (cfg_data != NULL)
+    {
+        free(cfg_data);
+        cfg_data = NULL;
+    }
+
+    if (cfg_file != NULL)
+    {
+        fclose(cfg_file);
+        cfg_file = NULL;
+    }
+
+    return ret;
+}
+
 struct BambuLib lib = {0};
 #if defined(_MSC_VER) || defined(_WIN32)
 static HMODULE module = NULL;
@@ -1858,6 +2035,33 @@ int start_bambu_stream(char *camera_url)
     return ret;
 }
 
+void print_usage(const char *app)
+{
+    fprintf(stderr, "%s usage:\n", app);
+    fprintf(stderr, "   %s start_stream [options]\n", app);
+    fprintf(stderr, "      Start a camera stream and write the raw stream to stdout\n");
+    fprintf(stderr, "   %s gen_cfg -u <account_name> -p <password> -r <region: us cn> [-d <dev_id>] [other_options]\n", app);
+    fprintf(stderr, "      Generate a simple BambuNetworkEngine.conf file\n");
+    fprintf(stderr, "   %s list_dev [options]\n", app);
+    fprintf(stderr, "      list machines info\n");
+    fprintf(stderr, "\n");
+    fprintf(stderr, " options:\n");
+    fprintf(stderr, "   -u <account_name>\n");
+    fprintf(stderr, "   -p <password>\n");
+    fprintf(stderr, "   -t <token>\n");
+    fprintf(stderr, "   -r <region>\n");
+    fprintf(stderr, "      us cn\n");
+    fprintf(stderr, "   -i <user_id>\n");
+    fprintf(stderr, "   -d <dev_id>\n");
+
+}
+
+enum bbl_app_mode {
+    BBL_START_STREAM = 1,
+    BBL_GEN_CFG,
+    BBL_LIST_DEV,
+};
+
 #if defined(_MSC_VER) || defined(_WIN32)
 int __cdecl main(int argc, char * argv[])
 #else
@@ -1867,6 +2071,8 @@ int main(int argc, char * argv[])
     static char region_cn[] = "cn";
     static char region_us[] = "us";
     int ret = 0;
+    int arg_offset = 0;
+    enum bbl_app_mode app_mode = BBL_START_STREAM;
     int is_bambu_init = 0;
     char *user_name = NULL;
     char *passwd = NULL;
@@ -1877,10 +2083,39 @@ int main(int argc, char * argv[])
     char *region = region_us;
     char camera_url[256] = {0};
 
-    fprintf(stderr, "by hisptoot 2022.10.28\n");
+    fprintf(stderr, "by hisptoot 2022.12.09\n");
+
+
+    if (argc > 1
+        && (0 == strcmp(argv[1], "help")
+            || 0 == strcmp(argv[1], "--help")
+            || 0 == strcmp(argv[1], "-h")
+            ))
+    {
+        print_usage(argv[0]);
+        return 0;
+    }
+    else if (argc > 1 
+        && 0 == strcmp(argv[1], "gen_cfg"))
+    {
+        arg_offset++;
+        app_mode = BBL_GEN_CFG;
+    }
+    else if (argc > 1 
+            && 0 == strcmp(argv[1], "start_stream"))
+    {
+        arg_offset++;
+        app_mode = BBL_START_STREAM;
+    }
+    else if (argc > 1 
+            && 0 == strcmp(argv[1], "list_dev"))
+    {
+        arg_offset++;
+        app_mode = BBL_LIST_DEV; 
+    }
 
     int option;
-    while ((option = getopt(argc, argv, "u:p:t:r:i:d:")) !=
+    while ((option = getopt(argc - arg_offset, &argv[arg_offset], "u:p:t:r:i:d:")) !=
            -1) 
     {
         switch (option) 
@@ -1992,6 +2227,13 @@ int main(int argc, char * argv[])
                 char *temp_user_id = NULL;
                 char *temp_dev_id = NULL;
                 char *temp_region = NULL;
+
+                if (app_mode == BBL_GEN_CFG)
+                {
+                    fprintf(stderr, "token is unknown, check username, password and region\n");
+                    break;
+                }
+
                 fprintf(stderr, "getting user info by BambuNetworkEngine.conf\n");
                 if (0 != get_bambu_studio_user_info(&temp_user_id, &temp_dev_id, &token, &temp_region)) 
                 {
@@ -2039,35 +2281,55 @@ int main(int argc, char * argv[])
             if (user_id == NULL) 
             {
                 fprintf(stderr, "failed get_user_id\n");
-                return 0;
+                break;
             }
             fprintf(stderr, "user_id: %s\n", user_id);
         }
 
         if (dev_id == NULL) 
         {
-            fprintf(stderr, "getting dev_id by token\n");
-            get_first_dev_id(token, region, &dev_id);
-            if (dev_id == NULL) 
+            if (app_mode != BBL_LIST_DEV)
             {
-                fprintf(stderr, "failed get_dev_id\n");
-                return 0;
+                fprintf(stderr, "getting dev_id by token\n");
+                get_first_dev_id(token, region, &dev_id);
+                if (dev_id == NULL) 
+                {
+                    fprintf(stderr, "failed get_dev_id\n");
+                    break;
+                }
+                fprintf(stderr, "dev_id: %s\n", dev_id);
             }
-            fprintf(stderr, "dev_id: %s\n", dev_id);
         }
 
         fprintf(stderr, "region: %s user_id: %s dev_id: %s\n", region, user_id, dev_id);
-        if (0 != get_camera_url(camera_url, user_id, dev_id, token, region))
+        if (app_mode == BBL_GEN_CFG)
         {
-            ret = -1;
-            fprintf(stderr, "get_camera_url failed\n");
-            break;
+            if (0 != gen_simple_bambu_cfg_file(user_id, region, token, dev_id))
+            {
+                fprintf(stderr, "gen_simple_bambu_cfg_file failed\n");
+                break;
+            }
         }
-        //fprintf(stderr, "camera_url: %s\n", camera_url);
-        ret = start_bambu_stream(camera_url);
-        if (!ret)
+        else if (app_mode == BBL_START_STREAM)
         {
-            fprintf(stderr, "start_bambu_stream failed %d\n", ret);
+            if (0 != get_camera_url(camera_url, user_id, dev_id, token, region))
+            {
+                fprintf(stderr, "get_camera_url failed\n");
+                break;
+            }
+            //fprintf(stderr, "camera_url: %s\n", camera_url);
+            ret = start_bambu_stream(camera_url);
+            if (!ret)
+            {
+                fprintf(stderr, "start_bambu_stream failed %d\n", ret);
+            }
+        }
+        else if (app_mode == BBL_LIST_DEV)
+        {
+            if (0 != list_machine_info(token, region))
+            {
+                fprintf(stderr, "list_machine_info failed %d\n", ret);
+            }
         }
     } while (false);
 
