@@ -2170,12 +2170,17 @@ int main(int argc, char * argv[])
     {
         lib_path[0] = '.';
     }
+
+#if defined(__APPLE__)
+    strcat(lib_path, "/libBambuSource.dylib");
+#else
     strcat(lib_path, "/libBambuSource.so");
+#endif
     //fprintf(stderr, "loading %s\n", lib_path);
     module = dlopen(lib_path, RTLD_LAZY);
     if (module == NULL)
     {
-        fprintf(stderr, "Failed loading libBambuSource.so\n");
+        fprintf(stderr, "Failed loading %s\n", lib_path);
         return -1;
     }
 #endif

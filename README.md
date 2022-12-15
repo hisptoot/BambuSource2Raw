@@ -38,7 +38,7 @@
             cd release-dir
             docker build -t bblrtsp:v1 .
             docker run --name BambuRTSP-1 -p 8554:8554 -v <FULL_PATH_OF_bambu_cfg_DIR>:/bambu-bin/cfg -d bblrtsp:v1
-            
+
 ## Windows
 1. Download <https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-full.7z>
    
@@ -57,10 +57,23 @@
 5. Use [VLC](https://www.videolan.org/vlc/) or something else to view the live stream: `rtsp://127.0.0.1:8554/bbl` or `rtsp://[ip of pc]:8554/bbl`
     
 # How to compile
+
+## macOS
+1.  Make sure you have the developer tools and homebrew installed
+
+2. Run the following
+```
+brew install curl`
+cd BambuSource2Raw
+make -f Makefile.macos
+```
+
 ## Linux
-    apt-get install -y unzip libcurl4 libcurl4-openssl-dev 
-    cd BambuSource2Raw
-    make -f Makefile.linux
+```
+apt-get install -y unzip libcurl4 libcurl4-openssl-dev 
+cd BambuSource2Raw
+make -f Makefile.linux
+```
 
 # Windows
 1. Download and Install Windows Driver Kit Version 7.1.0 from <https://www.microsoft.com/en-us/download/details.aspx?id=11800>
