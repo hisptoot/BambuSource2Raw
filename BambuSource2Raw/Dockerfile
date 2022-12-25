@@ -1,5 +1,5 @@
-FROM ubuntu:18.04
-RUN apt-get update && apt-get install -y curl
+FROM ubuntu:20.04
+RUN apt-get update && apt-get install -y curl iputils-ping
 RUN mkdir -p /bambu-bin
 RUN mkdir -p /bambu-bin/cfg
 WORKDIR /bambu-bin
