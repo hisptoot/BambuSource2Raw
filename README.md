@@ -4,15 +4,6 @@
 ## Prepare
 1. Download release archive of this project or just compile your own.
 
-2. Get dev id and access code of the machine
-
-   `bambusource2raw list_dev -u <account_name> -p <password> -r <region: us cn>`
-
-3. Generate BambuNetworkEngine.conf
-    
-    `bambusource2raw gen_cfg -u <account_name> -p <password> -r <region: us cn> -d <dev_id>` 
-
-        
 ## Linux
 1. `apt-get install -y libcurl4`
         
@@ -28,7 +19,15 @@
 
    Extract `libBambuSource.so` to `release` dir
 
-5. Start
+5. Get dev id and access code of the machine
+
+   `./bambusource2raw list_dev -u <account_name> -p <password> -r <region: us cn>`
+
+6. Generate `BambuNetworkEngine.conf`
+    
+    `./bambusource2raw gen_cfg -u <account_name> -p <password> -r <region: us cn> -d <dev_id>` 
+
+7. Start
     ### For X1/X1C
 
     #### Start in host shell:
@@ -82,7 +81,17 @@
    
    Extract `BambuSource.dll` to `release` dir
         
-4. Start
+4. Get dev id and access code of the machine
+
+   `bambusource2raw.exe list_dev -u <account_name> -p <password> -r <region: us cn>`
+
+5. Generate `BambuNetworkEngine.conf`
+    
+    `bambusource2raw.exe gen_cfg -u <account_name> -p <password> -r <region: us cn> -d <dev_id>` 
+
+6. Put `BambuNetworkEngine.conf` in the same folder with `bambusource2raw.exe`
+
+7. Start
 
     ### For X1/X1C
 
