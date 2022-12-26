@@ -29,14 +29,15 @@
    Extract `libBambuSource.so` to `release` dir
 
 5. Start
-    **For X1/X1C**
-    **Start in host shell:**
+    ### For X1/X1C
+
+    #### Start in host shell:
 
        cd release-dir
        cp BambuNetworkEngine.conf .
        ./start_rtsp_feed.sh
         
-    **Start in docker:**
+    #### Start in docker:
 
        mkdir bambu_cfg
        cp -f BambuNetworkEngine.conf bambu_cfg
@@ -45,15 +46,18 @@
        docker build -t bblrtsp:v1 .
        docker run --name BambuRTSP-1 -p 8554:8554 -v <FULL_PATH_OF_bambu_cfg_DIR>:/bambu-bin/cfg -d bblrtsp:v1
 
-    **For P1P**
-    **Start in host shell:**
+    ### For P1P
+
+    #### Start in host shell:
+
      Modify `P1PIP` and `P1PACCESSCODE` in `start_rtsp_feed_p1p.sh` to the exact value
 
        cd release-dir
        cp BambuNetworkEngine.conf .
        ./start_rtsp_feed_p1p.sh
         
-    **Start in docker:**
+    #### Start in docker:
+
      Modify `P1PIP` and `P1PACCESSCODE` in `start_rtsp_feed_docker_p1p.sh` to the exact value
      Modify the entry of `Dockerfile` to `/bambu-bin/start_rtsp_feed_docker_p1p.sh`
 
@@ -78,10 +82,13 @@
    Extract `BambuSource.dll` to `release` dir
         
 4. Start
-    **For X1/X1C**
+
+    ### For X1/X1C
+
       start `start_rtsp_feed.bat`
 
-    **For P1P**
+    ### For P1P
+
       Modify `P1PIP` and `P1PACCESSCODE` in `start_rtsp_feed_p1p.bat` to the exact value
       start `start_rtsp_feed_p1p.bat`
 
