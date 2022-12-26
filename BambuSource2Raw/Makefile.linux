@@ -13,9 +13,9 @@ RTSP_SIMPLE_SERVER_URL=https://github.com/aler9/rtsp-simple-server/releases/down
 RTSP_SIMPLE_SERVER_DOWNLOAD=/tmp/rtsp-simple-server_v0.20.0_linux_amd64.tar.gz
 
 BAMBU_SOURCE_URL=https://public-cdn.bambulab.cn/upgrade/studio/plugins/01.04.00.15/linux_01.04.00.15.zip
-BAMBU_SOURCE_DOWNLOAD=/tmp/bambusource_linux_01.03.00.02.zip
+BAMBU_SOURCE_DOWNLOAD=/tmp/bambusource_linux_01.04.00.15.zip
 
-all: $(outdir) $(outdir)/$(bin) $(outdir)/Dockerfile $(outdir)/start_rtsp_feed_docker.sh $(outdir)/start_rtsp_feed.sh $(outdir)/libBambuSource.so $(outdir)/ffmpeg $(outdir)/rtsp-simple-server
+all: $(outdir) $(outdir)/$(bin) $(outdir)/Dockerfile $(outdir)/start_rtsp_feed_docker.sh $(outdir)/start_rtsp_feed.sh $(outdir)/start_rtsp_feed_docker_p1p.sh $(outdir)/start_rtsp_feed_p1p.sh $(outdir)/libBambuSource.so $(outdir)/ffmpeg $(outdir)/rtsp-simple-server
 
 $(bin): $(obj)
 	@$(cc) -o $(bin) $(obj) $(ldflags)
@@ -38,6 +38,14 @@ $(outdir)/start_rtsp_feed_docker.sh: start_rtsp_feed_docker.sh
 	chmod +x $@
 
 $(outdir)/start_rtsp_feed.sh: start_rtsp_feed.sh
+	cp -f $< $(outdir)
+	chmod +x $@
+
+$(outdir)/start_rtsp_feed_docker_p1p.sh: start_rtsp_feed_docker_p1p.sh
+	cp -f $< $(outdir)
+	chmod +x $@
+
+$(outdir)/start_rtsp_feed_p1p.sh: start_rtsp_feed_p1p.sh
 	cp -f $< $(outdir)
 	chmod +x $@
 

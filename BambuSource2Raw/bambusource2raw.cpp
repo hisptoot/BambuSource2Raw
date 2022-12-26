@@ -2097,7 +2097,7 @@ int main(int argc, char * argv[])
     char *region = region_us;
     char camera_url[256] = {0};
 
-    fprintf(stderr, "by hisptoot 2022.12.09\n");
+    fprintf(stderr, "by hisptoot 2022.12.26\n");
 
 
     if (argc > 1
