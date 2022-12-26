@@ -59,6 +59,7 @@
     #### Start in docker:
 
      Modify `P1PIP` and `P1PACCESSCODE` in `start_rtsp_feed_docker_p1p.sh` to the exact value
+
      Modify the entry of `Dockerfile` to `/bambu-bin/start_rtsp_feed_docker_p1p.sh`
 
        mkdir bambu_cfg
@@ -90,6 +91,7 @@
     ### For P1P
 
       Modify `P1PIP` and `P1PACCESSCODE` in `start_rtsp_feed_p1p.bat` to the exact value
+
       start `start_rtsp_feed_p1p.bat`
 
 ## View live stream
