@@ -1704,6 +1704,13 @@ static int get_camera_url_local(char camera_url[256], const char *ip_addr, const
     return 0;
 }
 
+static int get_camera_url_local_x1c(char camera_url[256], const char *ip_addr, const char *access_code, const char *dev_id)
+{
+    _snprintf(camera_url, 256, "bambu:///rtsps___bblp:%s@%s/streaming/live/1?device=%s",
+        access_code, ip_addr, dev_id);
+    return 0;
+}
+
 static int get_first_dev_id_enum_func(void *ctx, cJSON *device_info_item)
 {
     char **dev_id = (char **)ctx;
@@ -1897,7 +1904,7 @@ int gen_simple_bambu_cfg_file(const char *user_id, const char *region, const cha
     return ret;
 }
 
-struct BambuLib lib = {0};
+BambuLib lib = {0};
 #if defined(_MSC_VER) || defined(_WIN32)
 static HMODULE module = NULL;
 #else
@@ -2049,6 +2056,8 @@ void print_usage(const char *app)
     fprintf(stderr, "      Start a camera stream and write the raw stream to stdout\n");
     fprintf(stderr, "   %s start_stream_local -s <ip_addr_of_p1p> -a <access_code_of_p1p>\n", app);
     fprintf(stderr, "      Start a local camera stream for p1p and write the raw stream to stdout\n");
+    fprintf(stderr, "   %s start_stream_local_x1c -s <ip_addr_of_x1c> -a <access_code_of_x1c> -d <dev_id_of_x1c>\n", app);
+    fprintf(stderr, "      Start a local camera stream for x1c and write the raw stream to stdout\n");
     fprintf(stderr, "   %s gen_cfg -u <account_name> -p <password> -r <region: us cn> [-d <dev_id>] [other_options]\n", app);
     fprintf(stderr, "      Generate a simple BambuNetworkEngine.conf file\n");
     fprintf(stderr, "   %s list_dev [options]\n", app);
@@ -2072,6 +2081,7 @@ enum bbl_app_mode {
     BBL_GEN_CFG,
     BBL_LIST_DEV,
     BBL_START_STREAM_LOCAL,
+    BBL_START_STREAM_LOCAL_X1C,
 };
 
 #if defined(_MSC_VER) || defined(_WIN32)
@@ -2091,13 +2101,13 @@ int main(int argc, char * argv[])
     char *user_id = NULL;
     char *token = NULL;
     char *dev_id = NULL;
-    char *p1p_ip_addr = NULL;
-    char *p1p_access_code = NULL;
+    char *ip_addr = NULL;
+    char *access_code = NULL;
     int is_region_specified = 0;
     char *region = region_us;
     char camera_url[256] = {0};
 
-    fprintf(stderr, "by hisptoot 2022.12.26\n");
+    fprintf(stderr, "by hisptoot 2023.08.02\n");
 
 
     if (argc > 1
@@ -2126,6 +2136,12 @@ int main(int argc, char * argv[])
     {
         arg_offset++;
         app_mode = BBL_START_STREAM_LOCAL;
+    }
+    else if (argc > 1
+            && 0 == strcmp(argv[1], "start_stream_local_x1c"))
+    {
+        arg_offset++;
+        app_mode = BBL_START_STREAM_LOCAL_X1C;
     }
     else if (argc > 1 
             && 0 == strcmp(argv[1], "list_dev"))
@@ -2166,12 +2182,12 @@ int main(int argc, char * argv[])
             dev_id = optarg;
             break;
         case 's':
-            fprintf(stderr, "p1p ip: %s\n", optarg);
-            p1p_ip_addr = optarg;
+            fprintf(stderr, "ip: %s\n", optarg);
+            ip_addr = optarg;
             break;
         case 'a':
             fprintf(stderr, "access code specified by user\n");
-            p1p_access_code = optarg;
+            access_code = optarg;
             break;
         default:
             break;
@@ -2354,12 +2370,31 @@ int main(int argc, char * argv[])
         }
         else if (app_mode == BBL_START_STREAM_LOCAL)
         {
-            if (p1p_ip_addr == NULL || p1p_access_code == NULL)
+            if (ip_addr == NULL || access_code == NULL)
             {
                 fprintf(stderr, "unknow p1p ip addr or access code\n");
                 break;
             }
-            if (0 != get_camera_url_local(camera_url, p1p_ip_addr, p1p_access_code))
+            if (0 != get_camera_url_local(camera_url, ip_addr, access_code))
+            {
+                fprintf(stderr, "get_camera_url_local failed\n");
+                break;
+            }
+            //fprintf(stderr, "camera_url: %s\n", camera_url);
+            ret = start_bambu_stream(camera_url);
+            if (!ret)
+            {
+                fprintf(stderr, "start_bambu_stream failed %d\n", ret);
+            }
+        }
+        else if (app_mode == BBL_START_STREAM_LOCAL_X1C)
+        {
+            if (ip_addr == NULL || access_code == NULL || dev_id == NULL)
+            {
+                fprintf(stderr, "unknow x1c ip addr or access code or dev id\n");
+                break;
+            }
+            if (0 != get_camera_url_local_x1c(camera_url, ip_addr, access_code, dev_id))
             {
                 fprintf(stderr, "get_camera_url_local failed\n");
                 break;
