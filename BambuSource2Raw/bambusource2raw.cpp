@@ -273,7 +273,8 @@ static int get_camera_url(char camera_url[256], const char *user_id, const char 
     static char header[4096] = {0};
     static char body[256] = {0};
     int is_global_site = 0;
-    static char rsp_json[4096] = {0};
+    size_t rsp_json_size = 4096;
+    char *rsp_json = NULL;
     DWORD byte_read = 0;
     DWORD byte_write = 0;
     INTERNET_BUFFERSA inet_buf = {0};
@@ -290,6 +291,15 @@ static int get_camera_url(char camera_url[256], const char *user_id, const char 
 
     do
     {
+        rsp_json = (char *)malloc(rsp_json_size);
+        if (rsp_json == NULL)
+        {
+            fprintf(stderr, "malloc buffer for get_camera_url failed\n");
+            ret = -1;
+            break;
+        }
+        memset(rsp_json, 0, rsp_json_size);
+
         if (0 == _stricmp(region,  "cn"))
         {
             is_global_site = 0;
@@ -361,23 +371,63 @@ static int get_camera_url(char camera_url[256], const char *user_id, const char 
 
         HttpEndRequestA(req_hnd, NULL, 0, 0);
 
-        if (!InternetReadFile(req_hnd, rsp_json, sizeof(rsp_json) - sizeof('\0'), &byte_read))
+
         {
-            ret = -1;
-            fprintf(stderr, "InternetReadFile failed 0x%x\n", GetLastError());
-            break;
+            size_t read_pos = 0;
+            int is_error = 0;
+            while(!is_error)
+            {
+                if (!InternetReadFile(req_hnd, &rsp_json[read_pos], rsp_json_size - read_pos - sizeof('\0'), &byte_read))
+                {
+                    is_error = 1;
+                    fprintf(stderr, "InternetReadFile failed 0x%x\n", GetLastError());
+                    break;
+                }
+
+                read_pos += byte_read;
+                if (byte_read > 0)
+                {
+                    if (read_pos >= rsp_json_size - sizeof('\0'))
+                    {
+                        char *new_json = NULL;
+                        rsp_json_size = rsp_json_size * 2;
+                        fprintf(stderr, "malloc new buffer for InternetReadFile size: %d\n", rsp_json_size);
+                        new_json = (char *)malloc(rsp_json_size);
+                        if (new_json == NULL)
+                        {
+                            fprintf(stderr, "malloc new buffer for InternetReadFile failed\n");
+                            exit(-1);
+                        }
+                        memset(new_json, 0, rsp_json_size);
+                        memcpy(new_json, rsp_json, read_pos);
+                        free(rsp_json);
+                        rsp_json = new_json;
+                    }
+
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            if (is_error)
+            {
+                ret = -1;
+                break; 
+            }
+
+            if (read_pos == 0)
+            {
+                DWORD err = 0;
+                InternetGetLastResponseInfoA(&err, NULL, 0);
+                ret = -1;
+                fprintf(stderr, "InternetReadFile read empty %d\n", err);
+                break;
+            }
         }
 
         //fprintf(stderr, "%s\n", rsp_json);
-        if (byte_read == 0)
-        {
-            DWORD err = 0;
-            InternetGetLastResponseInfoA(&err, NULL, 0);
-            ret = -1;
-            fprintf(stderr, "InternetReadFile read empty %d\n", err);
-            break;
-        }
-
         iot_json = cJSON_Parse(rsp_json);
         if (iot_json == NULL)
         {
@@ -456,6 +506,12 @@ static int get_camera_url(char camera_url[256], const char *user_id, const char 
     {
         InternetCloseHandle(inet_hnd);
         inet_hnd = NULL;
+    }
+
+    if (rsp_json != NULL)
+    {
+        free(rsp_json);
+        rsp_json = NULL;
     }
 
     return ret;
@@ -616,7 +672,8 @@ static int get_user_id(const char *token, const char *region, char **user_id)
     const char* accept_type[] = {"application/json", NULL};
     static char header[4096] = {0};
     int is_global_site = 0;
-    static char rsp_json[4096] = {0};
+    size_t rsp_json_size = 4096;
+    char *rsp_json = NULL;
     DWORD byte_read = 0;
 
     HINTERNET inet_hnd = NULL;
@@ -628,6 +685,15 @@ static int get_user_id(const char *token, const char *region, char **user_id)
 
     do
     {
+        rsp_json = (char *)malloc(rsp_json_size);
+        if (rsp_json == NULL)
+        {
+            fprintf(stderr, "malloc buffer for get_user_id failed\n");
+            ret = -1;
+            break;
+        }
+        memset(rsp_json, 0, rsp_json_size);
+
         if (0 == _stricmp(region,  "cn"))
         {
             is_global_site = 0;
@@ -683,23 +749,62 @@ static int get_user_id(const char *token, const char *region, char **user_id)
 
         HttpEndRequestA(req_hnd, NULL, 0, 0);
 
-        if (!InternetReadFile(req_hnd, rsp_json, sizeof(rsp_json) - sizeof('\0'), &byte_read))
         {
-            ret = -1;
-            fprintf(stderr, "InternetReadFile failed 0x%x\n", GetLastError());
-            break;
+            size_t read_pos = 0;
+            int is_error = 0;
+            while(!is_error)
+            {
+                if (!InternetReadFile(req_hnd, &rsp_json[read_pos], rsp_json_size - read_pos - sizeof('\0'), &byte_read))
+                {
+                    is_error = 1;
+                    fprintf(stderr, "InternetReadFile failed 0x%x\n", GetLastError());
+                    break;
+                }
+
+                read_pos += byte_read;
+                if (byte_read > 0)
+                {
+                    if (read_pos >= rsp_json_size - sizeof('\0'))
+                    {
+                        char *new_json = NULL;
+                        rsp_json_size = rsp_json_size * 2;
+                        fprintf(stderr, "malloc new buffer for InternetReadFile size: %d\n", rsp_json_size);
+                        new_json = (char *)malloc(rsp_json_size);
+                        if (new_json == NULL)
+                        {
+                            fprintf(stderr, "malloc new buffer for InternetReadFile failed\n");
+                            exit(-1);
+                        }
+                        memset(new_json, 0, rsp_json_size);
+                        memcpy(new_json, rsp_json, read_pos);
+                        free(rsp_json);
+                        rsp_json = new_json;
+                    }
+
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            if (is_error)
+            {
+                ret = -1;
+                break; 
+            }
+
+            if (read_pos == 0)
+            {
+                DWORD err = 0;
+                InternetGetLastResponseInfoA(&err, NULL, 0);
+                ret = -1;
+                fprintf(stderr, "InternetReadFile read empty %d\n", err);
+                break;
+            }
         }
 
         //fprintf(stderr, "%s\n", rsp_json);
-        if (byte_read == 0)
-        {
-            DWORD err = 0;
-            InternetGetLastResponseInfoA(&err, NULL, 0);
-            ret = -1;
-            fprintf(stderr, "InternetReadFile read empty %d\n", err);
-            break;
-        }
-
         ret_json = cJSON_Parse(rsp_json);
         if (ret_json == NULL)
         {
@@ -753,6 +858,12 @@ static int get_user_id(const char *token, const char *region, char **user_id)
         inet_hnd = NULL;
     }
 
+    if (rsp_json != NULL)
+    {
+        free(rsp_json);
+        rsp_json = NULL;
+    }
+
     return ret;
 }
 
@@ -765,7 +876,8 @@ static int enum_dev_lst(const char *token, const char *region, enum_dev_lst_cb c
     const char* accept_type[] = {"application/json", NULL};
     static char header[4096] = {0};
     int is_global_site = 0;
-    static char rsp_json[4096] = {0};
+    size_t rsp_json_size = 4096;
+    char *rsp_json = NULL;
     DWORD byte_read = 0;
 
     HINTERNET inet_hnd = NULL;
@@ -779,6 +891,15 @@ static int enum_dev_lst(const char *token, const char *region, enum_dev_lst_cb c
 
     do
     {
+        rsp_json = (char *)malloc(rsp_json_size);
+        if (rsp_json == NULL)
+        {
+            fprintf(stderr, "malloc buffer for enum_dev_lst failed\n");
+            ret = -1;
+            break;
+        }
+        memset(rsp_json, 0, rsp_json_size);
+
         if (0 == _stricmp(region,  "cn"))
         {
             is_global_site = 0;
@@ -834,23 +955,62 @@ static int enum_dev_lst(const char *token, const char *region, enum_dev_lst_cb c
 
         HttpEndRequestA(req_hnd, NULL, 0, 0);
 
-        if (!InternetReadFile(req_hnd, rsp_json, sizeof(rsp_json) - sizeof('\0'), &byte_read))
         {
-            ret = -1;
-            fprintf(stderr, "InternetReadFile failed 0x%x\n", GetLastError());
-            break;
+            size_t read_pos = 0;
+            int is_error = 0;
+            while(!is_error)
+            {
+                if (!InternetReadFile(req_hnd, &rsp_json[read_pos], rsp_json_size - read_pos - sizeof('\0'), &byte_read))
+                {
+                    is_error = 1;
+                    fprintf(stderr, "InternetReadFile failed 0x%x\n", GetLastError());
+                    break;
+                }
+
+                read_pos += byte_read;
+                if (byte_read > 0)
+                {
+                    if (read_pos >= rsp_json_size - sizeof('\0'))
+                    {
+                        char *new_json = NULL;
+                        rsp_json_size = rsp_json_size * 2;
+                        fprintf(stderr, "malloc new buffer for InternetReadFile size: %d\n", rsp_json_size);
+                        new_json = (char *)malloc(rsp_json_size);
+                        if (new_json == NULL)
+                        {
+                            fprintf(stderr, "malloc new buffer for InternetReadFile failed\n");
+                            exit(-1);
+                        }
+                        memset(new_json, 0, rsp_json_size);
+                        memcpy(new_json, rsp_json, read_pos);
+                        free(rsp_json);
+                        rsp_json = new_json;
+                    }
+
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            if (is_error)
+            {
+                ret = -1;
+                break; 
+            }
+
+            if (read_pos == 0)
+            {
+                DWORD err = 0;
+                InternetGetLastResponseInfoA(&err, NULL, 0);
+                ret = -1;
+                fprintf(stderr, "InternetReadFile read empty %d\n", err);
+                break;
+            }
         }
 
-        //fprintf(stderr, "%s\n", rsp_json);
-        if (byte_read == 0)
-        {
-            DWORD err = 0;
-            InternetGetLastResponseInfoA(&err, NULL, 0);
-            ret = -1;
-            fprintf(stderr, "InternetReadFile read empty %d\n", err);
-            break;
-        }
-
+        // fprintf(stderr, "%s\n", rsp_json);
         ret_json = cJSON_Parse(rsp_json);
         if (ret_json == NULL)
         {
@@ -922,6 +1082,12 @@ static int enum_dev_lst(const char *token, const char *region, enum_dev_lst_cb c
     {
         cJSON_Delete(ret_json);
         ret_json = NULL;
+    }
+
+    if (rsp_json != NULL)
+    {
+        free(rsp_json);
+        rsp_json = NULL;
     }
 
     return ret;
@@ -1428,7 +1594,7 @@ static int enum_dev_lst(const char *token, const char *region, enum_dev_lst_cb c
         rsp_json = (char *)malloc(rsp_json_init_size);
         if (rsp_json == NULL)
         {
-            fprintf(stderr, "malloc buffer for get_user_id failed\n");
+            fprintf(stderr, "malloc buffer for enum_dev_lst failed\n");
             ret = -1;
             break;
         }
@@ -1589,7 +1755,7 @@ static int get_camera_url(char camera_url[256], const char *user_id, const char 
         rsp_json = (char *)malloc(rsp_json_init_size);
         if (rsp_json == NULL)
         {
-            fprintf(stderr, "malloc buffer for get_user_id failed\n");
+            fprintf(stderr, "malloc buffer for get_camera_url failed\n");
             ret = -1;
             break;
         }
@@ -2165,7 +2331,7 @@ int main(int argc, char * argv[])
     char *region = region_us;
     char camera_url[256] = {0};
 
-    fprintf(stderr, "by hisptoot 2023.08.02\n");
+    fprintf(stderr, "by hisptoot 2023.11.15\n");
 
 
     if (argc > 1
