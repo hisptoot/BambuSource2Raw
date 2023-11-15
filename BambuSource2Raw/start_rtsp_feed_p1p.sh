@@ -19,4 +19,4 @@ if [[ -n "${SOURCE_PID// }" ]]; then
 fi
 
 echo "starting bambusource2raw"
-./bambusource2raw start_stream_local -s $P1PIP -a $P1PACCESSCODE | ./ffmpeg -i - -c copy -f rtsp rtsp://127.0.0.1:8554/bbl
+./bambusource2raw start_stream_local -s $P1PIP -a $P1PACCESSCODE | ./ffmpeg -fflags nobuffer -flags low_delay -analyzeduration 10 -probesize 3200 -i - -c copy -f rtsp rtsp://127.0.0.1:8554/bbl

@@ -28,7 +28,7 @@ echo "starting bambusource2raw"
 pushd /bambu-bin/cfg
 while :
 do
-    /bambu-bin/bambusource2raw start_stream_local -s $P1PIP -a $P1PACCESSCODE | /bambu-bin/ffmpeg -hide_banner -loglevel error -i - -c copy -f rtsp rtsp://127.0.0.1:8554/bbl
+    /bambu-bin/bambusource2raw start_stream_local -s $P1PIP -a $P1PACCESSCODE | /bambu-bin/ffmpeg -hide_banner -loglevel error -fflags nobuffer -flags low_delay -analyzeduration 10 -probesize 3200 -i - -c copy -f rtsp rtsp://127.0.0.1:8554/bbl
     sleep 30
     start_rtsp_server
 done

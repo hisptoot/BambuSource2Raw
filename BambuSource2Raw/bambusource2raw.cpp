@@ -273,7 +273,7 @@ static int get_camera_url(char camera_url[256], const char *user_id, const char 
     static char header[4096] = {0};
     static char body[256] = {0};
     int is_global_site = 0;
-    char rsp_json[1024] = {0};
+    static char rsp_json[4096] = {0};
     DWORD byte_read = 0;
     DWORD byte_write = 0;
     INTERNET_BUFFERSA inet_buf = {0};
@@ -616,7 +616,7 @@ static int get_user_id(const char *token, const char *region, char **user_id)
     const char* accept_type[] = {"application/json", NULL};
     static char header[4096] = {0};
     int is_global_site = 0;
-    char rsp_json[1024] = {0};
+    static char rsp_json[4096] = {0};
     DWORD byte_read = 0;
 
     HINTERNET inet_hnd = NULL;
@@ -765,7 +765,7 @@ static int enum_dev_lst(const char *token, const char *region, enum_dev_lst_cb c
     const char* accept_type[] = {"application/json", NULL};
     static char header[4096] = {0};
     int is_global_site = 0;
-    char rsp_json[1024] = {0};
+    static char rsp_json[4096] = {0};
     DWORD byte_read = 0;
 
     HINTERNET inet_hnd = NULL;
@@ -968,17 +968,24 @@ size_t rsp_write_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
 
     if (data->pos + size * nmemb >= data->total_size)
     {
-        write_size = data->total_size - data->pos;
+        char *old_data = data->data;
+        char *new_data = NULL;
+        size_t new_size = data->total_size + size * nmemb;
+        new_data = (char *)malloc(new_size + sizeof('\0'));
+        if (new_data == NULL)
+        {
+            fprintf(stderr, "malloc new buffer for rsp write failed\n");
+            exit(-1);
+        }
+        memset(new_data, 0, new_size + sizeof('\0'));
+
+        memcpy(new_data, old_data, data->pos);
+        data->data = new_data;
+        data->total_size = new_size;
+        free(old_data);
     }
-    else if (data->pos >= data->total_size)
-    {
-        write_size = size * nmemb;
-        return write_size;
-    }
-    else 
-    {
-        write_size = size * nmemb;
-    }
+
+    write_size = size * nmemb;
 
     memcpy(&data->data[data->pos], ptr, write_size);
     data->pos += write_size;
@@ -1266,7 +1273,9 @@ static int get_user_id(const char *token, const char *region, char **user_id)
     static char header_auth[4096] = {0};
     static char body[256] = {0};
     int is_global_site = 0;
-    static char rsp_json[1024] = {0};
+    struct bambu_curl_memory_data rsp_data = {0};
+    const size_t rsp_json_init_size = 4096;
+    char *rsp_json = NULL;
     CURL *curl = NULL;
     CURLcode res;
     struct curl_slist *header_list = NULL;
@@ -1276,6 +1285,18 @@ static int get_user_id(const char *token, const char *region, char **user_id)
 
     do
     {
+        rsp_json = (char *)malloc(rsp_json_init_size);
+        if (rsp_json == NULL)
+        {
+            fprintf(stderr, "malloc buffer for get_user_id failed\n");
+            ret = -1;
+            break;
+        }
+        memset(rsp_json, 0, rsp_json_init_size);
+        rsp_data.data = rsp_json;
+        rsp_data.total_size = rsp_json_init_size - sizeof('\0');
+        rsp_data.pos = 0;
+
         if (0 == _stricmp(region,  "cn"))
         {
             is_global_site = 0;
@@ -1310,10 +1331,6 @@ static int get_user_id(const char *token, const char *region, char **user_id)
         header_list = curl_slist_append(header_list, header_auth);
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
 
-        struct bambu_curl_memory_data rsp_data = {0};
-        rsp_data.data = &rsp_json[0];
-        rsp_data.total_size = sizeof(rsp_json) - sizeof('\0');
-        rsp_data.pos = 0;
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, rsp_write_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&rsp_data);
 
@@ -1325,6 +1342,8 @@ static int get_user_id(const char *token, const char *region, char **user_id)
                 curl_easy_strerror(res));
             break;
         }
+        rsp_json = rsp_data.data;
+        fprintf(stderr, "json len: %d\n", strlen(rsp_json));
 
         ret_json = cJSON_Parse(rsp_json);
         if (ret_json == NULL)
@@ -1361,6 +1380,11 @@ static int get_user_id(const char *token, const char *region, char **user_id)
         ret_json = NULL;
     }
 
+    if (rsp_data.data != NULL)
+    {
+        free(rsp_data.data);
+    }
+
     if (header_list != NULL)
     {
         curl_slist_free_all(header_list);
@@ -1386,7 +1410,9 @@ static int enum_dev_lst(const char *token, const char *region, enum_dev_lst_cb c
     static char header_auth[4096] = {0};
     static char body[256] = {0};
     int is_global_site = 0;
-    static char rsp_json[1024] = {0};
+    struct bambu_curl_memory_data rsp_data = {0};
+    const size_t rsp_json_init_size = 4096;
+    char *rsp_json = NULL;
     CURL *curl = NULL;
     CURLcode res;
     struct curl_slist *header_list = NULL;
@@ -1399,6 +1425,18 @@ static int enum_dev_lst(const char *token, const char *region, enum_dev_lst_cb c
 
     do
     {
+        rsp_json = (char *)malloc(rsp_json_init_size);
+        if (rsp_json == NULL)
+        {
+            fprintf(stderr, "malloc buffer for get_user_id failed\n");
+            ret = -1;
+            break;
+        }
+        memset(rsp_json, 0, rsp_json_init_size);
+        rsp_data.data = rsp_json;
+        rsp_data.total_size = rsp_json_init_size - sizeof('\0');
+        rsp_data.pos = 0;
+
         if (0 == _stricmp(region,  "cn"))
         {
             is_global_site = 0;
@@ -1433,10 +1471,6 @@ static int enum_dev_lst(const char *token, const char *region, enum_dev_lst_cb c
         header_list = curl_slist_append(header_list, header_auth);
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
 
-        struct bambu_curl_memory_data rsp_data = {0};
-        rsp_data.data = &rsp_json[0];
-        rsp_data.total_size = sizeof(rsp_json) - sizeof('\0');
-        rsp_data.pos = 0;
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, rsp_write_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&rsp_data);
 
@@ -1448,7 +1482,9 @@ static int enum_dev_lst(const char *token, const char *region, enum_dev_lst_cb c
                 curl_easy_strerror(res));
             break;
         }
+        rsp_json = rsp_data.data;
 
+        fprintf(stderr, "json len: %d\n", strlen(rsp_json));
         ret_json = cJSON_Parse(rsp_json);
         if (ret_json == NULL)
         {
@@ -1504,6 +1540,11 @@ static int enum_dev_lst(const char *token, const char *region, enum_dev_lst_cb c
         ret_json = NULL;
     }
 
+    if (rsp_data.data != NULL)
+    {
+        free(rsp_data.data);
+    }
+
     if (header_list != NULL)
     {
         curl_slist_free_all(header_list);
@@ -1530,7 +1571,9 @@ static int get_camera_url(char camera_url[256], const char *user_id, const char 
     static char header_userid[256] = {0};
     static char body[256] = {0};
     int is_global_site = 0;
-    static char rsp_json[1024] = {0};
+    struct bambu_curl_memory_data rsp_data = {0};
+    const size_t rsp_json_init_size = 4096;
+    char *rsp_json = NULL;
     CURL *curl = NULL;
     CURLcode res;
     struct curl_slist *header_list = NULL;
@@ -1543,6 +1586,18 @@ static int get_camera_url(char camera_url[256], const char *user_id, const char 
 
     do
     {
+        rsp_json = (char *)malloc(rsp_json_init_size);
+        if (rsp_json == NULL)
+        {
+            fprintf(stderr, "malloc buffer for get_user_id failed\n");
+            ret = -1;
+            break;
+        }
+        memset(rsp_json, 0, rsp_json_init_size);
+        rsp_data.data = rsp_json;
+        rsp_data.total_size = rsp_json_init_size - sizeof('\0');
+        rsp_data.pos = 0;
+
         if (0 == _stricmp(region,  "cn"))
         {
             is_global_site = 0;
@@ -1601,10 +1656,6 @@ static int get_camera_url(char camera_url[256], const char *user_id, const char 
         //curl_easy_setopt(curl, CURLOPT_READFUNCTION, body_read_callback);
         //curl_easy_setopt(curl, CURLOPT_READDATA, (void *)&body_data);
 
-        struct bambu_curl_memory_data rsp_data = {0};
-        rsp_data.data = &rsp_json[0];
-        rsp_data.total_size = sizeof(rsp_json) - sizeof('\0');
-        rsp_data.pos = 0;
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, rsp_write_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&rsp_data);
 
@@ -1616,7 +1667,9 @@ static int get_camera_url(char camera_url[256], const char *user_id, const char 
                 curl_easy_strerror(res));
             break;
         }
+        rsp_json = rsp_data.data;
 
+        fprintf(stderr, "json len: %d\n", strlen(rsp_json));
         iot_json = cJSON_Parse(rsp_json);
         if (iot_json == NULL)
         {
@@ -1677,6 +1730,11 @@ static int get_camera_url(char camera_url[256], const char *user_id, const char 
     {
         cJSON_Delete(iot_json);
         iot_json = NULL;
+    }
+
+    if (rsp_data.data != NULL)
+    {
+        free(rsp_data.data);
     }
 
     if (header_list != NULL)
@@ -2166,7 +2224,13 @@ int main(int argc, char * argv[])
             break;
         case 't':
             fprintf(stderr, "token specified by user\n");
-            token = optarg;
+            token = (char *)malloc(strlen(optarg) + sizeof('\0'));
+            if (token == NULL)
+            {
+                fprintf(stderr, "malloc for token failed\n");
+                exit(-1);
+            }
+            strcpy(token, optarg);
             break;
         case 'r':
             fprintf(stderr, "region: %s\n", optarg);
@@ -2175,11 +2239,23 @@ int main(int argc, char * argv[])
             break;
         case 'i':
             fprintf(stderr, "user_id: %s\n", optarg);
-            user_id = optarg;
+            user_id = (char *)malloc(strlen(optarg) + sizeof('\0'));
+            if (user_id == NULL)
+            {
+                fprintf(stderr, "malloc for user_id failed\n");
+                exit(-1);
+            }
+            strcpy(user_id, optarg);
             break;
         case 'd':
             fprintf(stderr, "dev_id: %s\n", optarg);
-            dev_id = optarg;
+            dev_id = (char *)malloc(strlen(optarg) + sizeof('\0'));
+            if (dev_id == NULL)
+            {
+                fprintf(stderr, "malloc for dev_id failed\n");
+                exit(-1);
+            }
+            strcpy(dev_id, optarg);
             break;
         case 's':
             fprintf(stderr, "ip: %s\n", optarg);

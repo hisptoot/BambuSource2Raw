@@ -13,7 +13,7 @@ IF ERRORLEVEL 1 (start "rtsp server" /B rtsp-simple-server.exe) ELSE (GOTO :Star
 timeout /t 5 /nobreak
 
 :StartStream
-bambusource2raw.exe start_stream_local -s %P1PIP% -a %P1PACCESSCODE% | ffmpeg -i - -c copy -f rtsp rtsp://127.0.0.1:8554/bbl
+bambusource2raw.exe start_stream_local -s %P1PIP% -a %P1PACCESSCODE% | ffmpeg -fflags nobuffer -flags low_delay -analyzeduration 10 -probesize 3200 -i - -c copy -f rtsp rtsp://127.0.0.1:8554/bbl
 GOTO :EOF
 
 :ErrorSourceExist
