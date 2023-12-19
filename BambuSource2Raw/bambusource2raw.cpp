@@ -21,10 +21,12 @@
 #define _snprintf snprintf
 #define _stricmp strcmp
 #endif
+#include <time.h>
 #include "cJSON.h"
 #include "BambuTunnel.h"
 
 #define BAMBUE_START_STREAM_RETRY_COUNT (40)
+#define BAMBU_STREAM_READ_SAMPLE_TIMEOUT (60)
 
 /* ret 0 means stop, 1 means continue */
 typedef int (*enum_dev_lst_cb)(void *ctx, cJSON *device_info_item);
@@ -2223,6 +2225,7 @@ int start_bambu_stream(char *camera_url)
             break;
         }
 
+        time_t last_sample_time = time(NULL);
         int result = 0;
         while (true) 
         {
@@ -2233,10 +2236,18 @@ int start_bambu_stream(char *camera_url)
             {
                 fwrite(sample.buffer, 1, sample.size, stdout);
                 fflush(stdout);
+                last_sample_time = time(NULL);
                 continue;
             } 
             else if (result == Bambu_would_block) 
             {
+                time_t now_time = time(NULL);
+                if (now_time - last_sample_time > BAMBU_STREAM_READ_SAMPLE_TIMEOUT)
+                {
+                    fprintf(stderr, "Read Bambu Stream Sample timeout\n");
+                    ret = -1;
+                    break;
+                }
 #if defined(_MSC_VER) || defined(_WIN32)
                 Sleep(100);
 #else
@@ -2331,7 +2342,7 @@ int main(int argc, char * argv[])
     char *region = region_us;
     char camera_url[256] = {0};
 
-    fprintf(stderr, "by hisptoot 2023.11.15\n");
+    fprintf(stderr, "by hisptoot 2023.12.19\n");
 
 
     if (argc > 1
